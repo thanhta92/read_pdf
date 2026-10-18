@@ -1,0 +1,3038 @@
+<!DOCTYPE html>
+<html lang="vi" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+  <title>DocuFlow - Trình Đọc & Quản Lý PDF Cá Nhân</title>
+
+  <!-- PWA & Mobile Meta Tags -->
+  <meta name="theme-color" content="#4f46e5">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="Trình đọc và Quản lý PDF Cá nhân lưu trữ Offline (IndexedDB), tạo Highlight, chèn Ghi chú và Bookmark cực mượt trên Mobile và Desktop.">
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              200: '#c7d2fe',
+              300: '#a5b4fc',
+              400: '#818cf8',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+              800: '#3730a3',
+              900: '#312e81',
+              950: '#1e1b4b',
+            }
+          },
+          animation: {
+            'flash-pulse': 'flashPulse 1.8s ease-in-out',
+            'bounce-subtle': 'bounceSubtle 0.3s ease-out',
+          },
+          keyframes: {
+            flashPulse: {
+              '0%, 100%': { boxShadow: '0 0 0 0 rgba(99, 102, 241, 0)' },
+              '20%, 60%': { boxShadow: '0 0 0 8px rgba(99, 102, 241, 0.65)' },
+            },
+            bounceSubtle: {
+              '0%': { transform: 'scale(0.95)' },
+              '60%': { transform: 'scale(1.03)' },
+              '100%': { transform: 'scale(1)' }
+            }
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- PDF.js CDN (v3.11.174) & Viewer CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf_viewer.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!-- PDF-Lib CDN (v1.17.1) để ghi đè và lưu nội dung chữ trực tiếp vào file PDF -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Thanh cuộn hiện đại */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(156, 163, 175, 0.4);
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(156, 163, 175, 0.7);
+    }
+
+    /* Text Layer chuẩn PDF.js để bôi đen văn bản cực kỳ chính xác */
+    .textLayer {
+      position: absolute;
+      text-align: initial;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      overflow: hidden;
+      opacity: 0.2;
+      line-height: 1;
+      text-size-adjust: none;
+      forced-color-adjust: none;
+      transform-origin: 0 0;
+      z-index: 5;
+    }
+    .textLayer span, .textLayer br {
+      color: transparent;
+      position: absolute;
+      white-space: pre;
+      cursor: text;
+      transform-origin: 0% 0%;
+    }
+    .textLayer ::selection {
+      background: rgba(99, 102, 241, 0.4);
+    }
+
+    /* Lớp Highlight & Lớp Chèn Ghi Chú */
+    #highlight-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 4;
+    }
+    #annotation-layer {
+      position: absolute;
+      inset: 0;
+      z-index: 10;
+    }
+
+    /* Tùy biến chữ chèn trực tiếp phẳng trên trang PDF */
+    .direct-pdf-text {
+      touch-action: none;
+    }
+    .direct-pdf-text:hover .direct-text-display {
+      outline: 1px dashed rgba(99, 102, 241, 0.6);
+      background-color: rgba(99, 102, 241, 0.04);
+    }
+    .direct-inline-input {
+      user-select: text;
+    }
+
+    /* Hiệu ứng nổi bật khi nhảy tới Bookmark hoặc Highlight */
+    .highlight-flash {
+      animation: highlightPulse 2s ease-in-out;
+    }
+    @keyframes highlightPulse {
+      0%, 100% { outline: 0px solid transparent; }
+      25%, 75% { outline: 4px solid #6366f1; outline-offset: 3px; }
+    }
+
+    /* Tối ưu cuộn mượt không hiện thanh cuộn xấu trên Mobile */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* Hiển thị thanh công cụ khi active/focus trên thiết bị cảm ứng */
+    .direct-pdf-text:focus-within .text-hover-bar,
+    .direct-pdf-text:active .text-hover-bar {
+      opacity: 1 !important;
+      pointer-events: auto !important;
+    }
+  </style>
+</head>
+<body class="h-full bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col overflow-hidden select-none">
+
+  <!-- ======================================================== -->
+  <!-- 1. THANH ĐIỀU HƯỚNG TRÊN CÙNG (HEADER BAR)                -->
+  <!-- ======================================================== -->
+  <header class="h-14 sm:h-16 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-3 sm:px-5 shrink-0 z-30 transition-colors">
+    <!-- Phía trái: Menu Mobile + Logo + Tiêu đề tài liệu -->
+    <div class="flex items-center gap-2 sm:gap-3 min-w-0">
+      <!-- Nút mở Drawer Menu trên Mobile -->
+      <button id="btn-open-sidebar" class="lg:hidden p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 focus:outline-none" title="Mở danh bạ tài liệu">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+
+      <!-- Logo & Tên ứng dụng -->
+      <div class="flex items-center gap-2 cursor-pointer" onclick="closeDocument()">
+        <div class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white shadow-md shadow-indigo-500/20">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+          </svg>
+        </div>
+        <span class="font-bold text-base sm:text-lg tracking-tight hidden sm:inline bg-gradient-to-r from-indigo-600 to-violet-600 dark:from-indigo-400 dark:to-violet-400 bg-clip-text text-transparent">DocuFlow</span>
+      </div>
+
+      <!-- Tiêu đề file PDF đang đọc -->
+      <div class="h-5 w-px bg-slate-300 dark:bg-slate-700 mx-1 hidden sm:block"></div>
+      <div class="flex items-center gap-1.5 min-w-0 max-w-[130px] xs:max-w-[160px] sm:max-w-xs md:max-w-md">
+        <span id="header-filename" class="text-xs sm:text-sm font-semibold truncate text-slate-700 dark:text-slate-200">Chưa mở tài liệu</span>
+        <span id="header-filesize" class="text-[10px] sm:text-xs text-slate-400 font-normal shrink-0 hidden md:inline"></span>
+      </div>
+    </div>
+
+
+
+    <!-- Phía phải: Tải lên, Bảng Mục lục & Dark Mode -->
+    <div class="flex items-center gap-1 sm:gap-2">
+      <!-- Nút tải file PDF lên -->
+      <label for="pdf-file-input" class="cursor-pointer inline-flex items-center gap-1.5 p-2 sm:px-3 sm:py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs sm:text-sm font-semibold shadow-md shadow-indigo-500/25 transition-all" title="Tải PDF lên">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+        </svg>
+        <span class="hidden sm:inline">Thêm PDF</span>
+      </label>
+      <input type="file" id="pdf-file-input" accept="application/pdf" class="hidden" multiple onchange="handleFileUpload(event)">
+
+      <!-- Nút Tìm kiếm trong tài liệu PDF (Hiện khi mở tài liệu) -->
+      <button id="btn-toggle-search-pdf" class="hidden p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 focus:outline-none transition-colors" title="Tìm trong tài liệu (Ctrl+F)" onclick="togglePdfSearch()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+      </button>
+
+      <!-- Nút Tải file PDF về máy (Hiện khi mở tài liệu) -->
+      <button id="btn-download-pdf" class="hidden p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 focus:outline-none transition-colors" title="Tải file PDF về máy" onclick="downloadCurrentPDF()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+      </button>
+
+      <!-- Nút In tài liệu PDF (Hiện khi mở tài liệu trên laptop/desktop) -->
+      <button id="btn-print-pdf" class="hidden sm:inline-flex p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 focus:outline-none transition-colors" title="In tài liệu" onclick="printCurrentPDF()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+      </button>
+
+      <!-- Nút mở Bảng Mục lục & Ghi chú (Chỉ hiện khi mở tài liệu) -->
+      <button id="btn-toggle-panels" class="hidden p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 focus:outline-none relative transition-colors" title="Mục lục & Ghi chú" onclick="toggleRightPanel()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+        </svg>
+        <span id="panel-badge-count" class="hidden absolute top-1 right-1 w-2 h-2 rounded-full bg-indigo-600 ring-2 ring-white dark:ring-slate-900"></span>
+      </button>
+
+      <!-- Nút Toàn màn hình (Hiện trên Laptop/Desktop) -->
+      <button id="btn-toggle-fullscreen" class="hidden sm:inline-flex p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 focus:outline-none transition-colors" title="Toàn màn hình" onclick="toggleFullscreen()">
+        <svg id="icon-fullscreen-enter" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+        <svg id="icon-fullscreen-exit" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 14h6m0 0v6m0-6l-7 7m17-11h-6m0 0V4m0 6l7-7m-7 17v-6m0 0h6m-6 0l7 7M10 4v6m0 0H4m6 0L3 3"/></svg>
+      </button>
+
+      <!-- Nút chuyển đổi Dark/Light mode -->
+      <button id="btn-toggle-theme" class="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 focus:outline-none transition-colors" title="Chuyển chế độ sáng/tối" onclick="toggleTheme()">
+        <svg id="icon-theme-light" class="w-5 h-5 hidden dark:block text-amber-400" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clip-rule="evenodd" />
+        </svg>
+        <svg id="icon-theme-dark" class="w-5 h-5 block dark:hidden text-slate-600" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ======================================================== -->
+  <!-- 2. KHÔNG GIAN LÀM VIỆC CHÍNH (MAIN WORKSPACE)            -->
+  <!-- ======================================================== -->
+  <div class="flex flex-1 overflow-hidden relative">
+
+    <!-- BACKDROP CHO MOBILE DRAWER (SIDEBAR) -->
+    <div id="sidebar-backdrop" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 hidden lg:hidden transition-opacity opacity-0" onclick="closeSidebarDrawer()"></div>
+
+    <!-- ======================================================== -->
+    <!-- 2.1 SIDEBAR: QUẢN LÝ CÂY THƯ MỤC & FILE PDF              -->
+    <!-- ======================================================== -->
+    <aside id="sidebar-drawer" class="fixed inset-y-0 left-0 w-80 max-w-[85vw] bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 z-50 flex flex-col transform -translate-x-full lg:static lg:translate-x-0 transition-transform duration-300 ease-in-out shadow-2xl lg:shadow-none">
+      <!-- Tiêu đề Sidebar & Nút đóng trên Mobile -->
+      <div class="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+          </svg>
+          <span class="font-bold text-sm tracking-wide text-slate-800 dark:text-slate-100 uppercase">Thư viện tài liệu</span>
+        </div>
+        <button class="lg:hidden p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" onclick="closeSidebarDrawer()">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Ô tìm kiếm file nhanh -->
+      <div class="p-3 border-b border-slate-200 dark:border-slate-800">
+        <div class="relative">
+          <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          </span>
+          <input type="text" id="search-input" placeholder="Tìm tên tài liệu PDF..." class="w-full pl-9 pr-8 py-2 text-xs bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-700 dark:text-slate-200 placeholder-slate-400 transition-all" oninput="handleSearch(this.value)">
+          <button id="search-clear-btn" class="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600 hidden" onclick="clearSearch()">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Cây thư mục (Folder Tree) -->
+      <div class="p-3 border-b border-slate-200 dark:border-slate-800 max-h-48 overflow-y-auto">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Thư mục</span>
+          <button onclick="openFolderModal('create')" class="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:underline">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            Tạo thư mục
+          </button>
+        </div>
+        <div id="folder-tree-list" class="space-y-1">
+          <!-- Render dynamic cây thư mục -->
+        </div>
+      </div>
+
+      <!-- Danh sách File PDF tương ứng trong thư mục -->
+      <div class="flex-1 overflow-y-auto p-3 flex flex-col min-h-0">
+        <div class="flex items-center justify-between mb-2 shrink-0">
+          <span id="file-list-heading" class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Danh sách tệp (0)</span>
+          <span id="current-folder-badge" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 font-medium truncate max-w-[120px]">Tất cả</span>
+        </div>
+
+        <div id="file-list-items" class="space-y-1.5 flex-1 overflow-y-auto">
+          <!-- Render danh sách file -->
+        </div>
+      </div>
+
+      <!-- Thông tin lưu trữ và Nút demo -->
+      <div class="p-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 shrink-0 space-y-2">
+        <div class="flex items-center justify-between text-[11px] text-slate-500">
+          <span class="flex items-center gap-1">
+            <svg class="w-3.5 h-3.5 text-emerald-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+            Bộ nhớ: IndexedDB
+          </span>
+          <span id="storage-status-text" class="text-[10px] text-slate-400 font-mono">Offline Ready</span>
+        </div>
+        <button onclick="loadDemoSamplePDF()" class="w-full py-2 px-3 rounded-xl border border-dashed border-indigo-300 dark:border-indigo-700/60 bg-indigo-50/50 dark:bg-indigo-950/30 hover:bg-indigo-100/50 text-indigo-600 dark:text-indigo-400 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          Mở tài liệu mẫu (Thử nghiệm)
+        </button>
+      </div>
+    </aside>
+
+    <!-- ======================================================== -->
+    <!-- 2.2 KHU VỰC TRÌNH ĐỌC PDF (READER VIEWPORT)               -->
+    <!-- ======================================================== -->
+    <main class="flex-1 flex flex-col h-full overflow-hidden bg-slate-100/70 dark:bg-slate-950 relative">
+
+      <!-- TRẠNG THÁI TRỐNG (EMPTY STATE KHI CHƯA MỞ FILE) -->
+      <div id="reader-empty-state" class="flex-1 flex flex-col items-center justify-center p-6 text-center animate-fade-in">
+        <div class="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/50 flex items-center justify-center text-indigo-600 mb-5 shadow-xl shadow-indigo-500/10">
+          <svg class="w-10 h-10 sm:w-12 sm:h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        </div>
+        <h2 class="text-lg sm:text-2xl font-bold text-slate-800 dark:text-slate-100 mb-2">Trình đọc & Quản lý PDF Cá nhân</h2>
+        <p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-md mb-6 leading-relaxed">
+          Tải lên tài liệu PDF từ thiết bị của bạn để đọc với độ phân giải cao, bôi màu Highlight, chèn Ghi chú trực tiếp và tạo Bookmark nhanh.
+        </p>
+        <div class="flex flex-col sm:flex-row gap-3 w-full max-w-xs">
+          <label for="pdf-file-input" class="cursor-pointer flex items-center justify-center gap-2 py-3 px-5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs sm:text-sm shadow-lg shadow-indigo-500/25 active:scale-95 transition-all">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+            Tải PDF từ máy
+          </label>
+          <button onclick="loadDemoSamplePDF()" class="flex items-center justify-center gap-2 py-3 px-5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs sm:text-sm shadow-sm hover:bg-slate-50 dark:hover:bg-slate-700/60 active:scale-95 transition-all">
+            <svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            Dùng thử tài liệu mẫu
+          </button>
+        </div>
+      </div>
+
+      <!-- GIAO DIỆN TRÌNH ĐỌC (HIỆN KHI ĐÃ CÓ TÀI LIỆU PDF) -->
+      <div id="reader-active-view" class="flex-1 flex flex-col h-full overflow-hidden hidden">
+
+        <!-- THANH CÔNG CỤ ĐỌC PDF (READER CONTROL BAR) -->
+        <div class="h-14 sm:h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-3 sm:px-5 flex items-center justify-between shrink-0 shadow-sm z-20 overflow-x-auto no-scrollbar gap-2.5 sm:gap-3">
+          
+          <!-- KHỐI 1: ĐIỀU HƯỚNG TRANG -->
+          <div class="flex items-center gap-1 sm:gap-2 shrink-0">
+            <!-- Nút Trang trước -->
+            <button id="btn-prev-page" class="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all" title="Trang trước" onclick="prevPage()">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+            </button>
+
+            <!-- Ô nhập số trang trực tiếp: "Trang X / Tổng Y" -->
+            <div class="flex items-center gap-1 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-2 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
+              <span>Trang</span>
+              <input type="number" id="current-page-input" min="1" value="1" class="w-10 text-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg py-0.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-500" onchange="jumpToPageInput(this.value)" onkeydown="if(event.key==='Enter') jumpToPageInput(this.value)">
+              <span class="text-slate-400">/</span>
+              <span id="total-pages-text">1</span>
+            </div>
+
+            <!-- Nút Trang sau -->
+            <button id="btn-next-page" class="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all" title="Trang sau" onclick="nextPage()">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            </button>
+
+            <!-- Slider kéo chuyển trang nhanh (Scrubber) -->
+            <div class="hidden md:flex items-center gap-2 pl-2 border-l border-slate-200 dark:border-slate-700 w-32 lg:w-44">
+              <input type="range" id="page-slider" min="1" max="1" value="1" class="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg" oninput="handlePageSlider(this.value)">
+            </div>
+          </div>
+
+          <!-- KHỐI 2: ĐIỀU KHIỂN ZOOM ĐỘNG & XOAY TRANG -->
+          <div class="flex items-center gap-1 sm:gap-1.5 shrink-0">
+            <!-- Nút Thu nhỏ (-) -->
+            <button class="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 transition-all" title="Thu nhỏ (-)" onclick="zoomOut()">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/></svg>
+            </button>
+
+            <!-- Dropdown chọn nhanh tỉ lệ Zoom -->
+            <select id="zoom-select" class="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1.5 text-xs font-semibold cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500" onchange="handleZoomSelect(this.value)">
+              <option value="0.5">50%</option>
+              <option value="0.75">75%</option>
+              <option value="1" selected>100%</option>
+              <option value="1.25">125%</option>
+              <option value="1.5">150%</option>
+              <option value="2">200%</option>
+              <option value="fit-width">Vừa chiều rộng</option>
+              <option value="fit-page">Vừa trang</option>
+            </select>
+
+            <!-- Nút Phóng to (+) -->
+            <button class="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 transition-all" title="Phóng to (+)" onclick="zoomIn()">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            </button>
+
+            <!-- Nút Reset về 100% -->
+            <button class="hidden sm:inline-flex px-2 py-1 rounded-lg text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50" title="Đặt lại 100%" onclick="setZoom(1)">
+              100%
+            </button>
+
+            <div class="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-0.5 hidden sm:block"></div>
+
+            <!-- Nút Xoay trang 90 độ -->
+            <button class="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 transition-all" title="Xoay trang 90° (R)" onclick="rotatePage()">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            </button>
+
+            <!-- Nút Chuyển chế độ Cuộn liên tục / Trang đơn -->
+            <button id="btn-toggle-scroll-mode" class="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 transition-all flex items-center gap-1.5" title="Chuyển chế độ Cuộn liên tục / Trang đơn" onclick="toggleScrollMode()">
+              <svg id="icon-scroll-mode" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 13l-7 7-7-7m14-8l-7 7-7-7"/></svg>
+              <span id="label-scroll-mode" class="text-xs font-semibold hidden lg:inline">Trang đơn</span>
+            </button>
+
+            <!-- Nút Chèn Chữ Trực Tiếp vào PDF (Text Tool) -->
+            <button id="btn-tool-text" class="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 active:scale-95 transition-all flex items-center gap-1.5" title="Chèn văn bản trực tiếp vào PDF (T)" onclick="toggleTextTool()">
+              <svg class="w-4 h-4 text-indigo-600 dark:text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg>
+              <span id="label-tool-text">Chèn chữ</span>
+            </button>
+          </div>
+
+          <!-- KHỐI 3: TIỆN ÍCH BOOKMARK -->
+          <div class="flex items-center gap-1.5 shrink-0">
+            <!-- Nút Thêm / Bỏ Bookmark cho trang hiện tại -->
+            <button id="btn-add-bookmark" class="inline-flex items-center gap-1 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 active:scale-95 transition-all" onclick="openBookmarkModal()">
+              <svg id="icon-bookmark-star" class="w-4 h-4 text-slate-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+              </svg>
+              <span class="hidden sm:inline">Bookmark</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- THANH ĐỊNH DẠNG VĂN BẢN TRỰC TIẾP (TEXT FORMAT BAR) -->
+        <div id="pdf-text-format-bar" class="hidden h-11 bg-indigo-50/95 dark:bg-slate-900/95 border-b border-indigo-100 dark:border-slate-800 px-2 sm:px-5 flex items-center justify-between text-xs shrink-0 z-20 shadow-sm animate-fade-in gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar">
+          <div class="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+            <span class="inline-flex items-center gap-1 font-semibold text-indigo-700 dark:text-indigo-300">
+              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span class="hidden md:inline">Nhấp vào vị trí bất kỳ trên trang để gõ:</span>
+              <span class="hidden sm:inline md:hidden">Chèn chữ:</span>
+            </span>
+            <div class="h-4 w-px bg-slate-300 dark:bg-slate-700 hidden sm:block"></div>
+            <!-- Cỡ chữ -->
+            <div class="flex items-center gap-1">
+              <span class="text-slate-500 dark:text-slate-400 text-[11px] hidden xs:inline">Cỡ:</span>
+              <select id="text-tool-fontsize" class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-1.5 py-1 text-xs font-semibold text-slate-700 dark:text-slate-200 focus:outline-none" onchange="setTextToolFontSize(this.value)">
+                <option value="12">12px</option>
+                <option value="14">14px</option>
+                <option value="16" selected>16px</option>
+                <option value="18">18px</option>
+                <option value="22">22px</option>
+                <option value="26">26px</option>
+                <option value="32">32px</option>
+              </select>
+            </div>
+            <!-- Màu chữ -->
+            <div class="flex items-center gap-1">
+              <div class="flex items-center gap-1">
+                <button type="button" onclick="setTextToolColor('#0f172a')" class="text-color-swatch w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-slate-900 border-2 border-indigo-500 shadow-sm transition-transform hover:scale-110" data-color="#0f172a" title="Đen"></button>
+                <button type="button" onclick="setTextToolColor('#2563eb')" class="text-color-swatch w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-blue-600 border-2 border-transparent shadow-sm transition-transform hover:scale-110" data-color="#2563eb" title="Xanh dương"></button>
+                <button type="button" onclick="setTextToolColor('#dc2626')" class="text-color-swatch w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-red-600 border-2 border-transparent shadow-sm transition-transform hover:scale-110" data-color="#dc2626" title="Đỏ"></button>
+                <button type="button" onclick="setTextToolColor('#16a34a')" class="text-color-swatch w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-emerald-600 border-2 border-transparent shadow-sm transition-transform hover:scale-110" data-color="#16a34a" title="Xanh lá"></button>
+              </div>
+            </div>
+            <!-- In đậm -->
+            <button id="btn-text-bold" onclick="toggleTextToolBold()" class="px-2 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 transition-colors" title="In đậm (Bold)">B</button>
+          </div>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button onclick="saveAndBakePdfChanges()" class="px-2.5 sm:px-3 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-sm flex items-center gap-1 transition-all active:scale-95" title="Lưu chữ trực tiếp thành nội dung vĩnh viễn trong file PDF">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
+              <span class="hidden sm:inline">Lưu vào file PDF</span>
+              <span class="sm:hidden">Lưu</span>
+            </button>
+            <button onclick="toggleTextTool(false)" class="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg" title="Thoát chế độ chèn chữ">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- THANH TÌM KIẾM TỪ KHÓA TRONG PDF (IN-DOCUMENT SEARCH BAR) -->
+        <div id="pdf-search-bar" class="hidden absolute top-16 right-2 left-2 sm:left-auto sm:right-6 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md shadow-2xl border border-slate-200 dark:border-slate-700 rounded-2xl p-2 flex items-center justify-between sm:justify-start gap-2 animate-fade-in text-xs max-w-full">
+          <div class="relative flex items-center flex-1 sm:flex-initial">
+            <svg class="w-4 h-4 text-slate-400 absolute left-2.5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            <input type="text" id="pdf-search-input" placeholder="Tìm từ khóa trong PDF..." class="pl-8 pr-3 py-1.5 w-full sm:w-64 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-100" oninput="debounceSearchPdfText(this.value)" onkeydown="handlePdfSearchKeydown(event)">
+          </div>
+          <span id="pdf-search-match-count" class="text-[11px] font-semibold text-slate-400 min-w-[45px] text-center shrink-0">0 / 0</span>
+          <button onclick="findPrevMatch()" class="p-1.5 rounded-lg text-slate-500 hover:text-indigo-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0" title="Kết quả trước (Shift+Enter)">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>
+          </button>
+          <button onclick="findNextMatch()" class="p-1.5 rounded-lg text-slate-500 hover:text-indigo-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0" title="Kết quả tiếp theo (Enter)">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <button onclick="closePdfSearch()" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0" title="Đóng tìm kiếm (Esc)">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        <!-- KHUNG CHỨA CANVAS VÀ CÁC LỚP LAYER HIỂN THỊ TRANG PDF -->
+        <div id="pdf-scroll-container" class="flex-1 overflow-auto p-4 sm:p-6 flex flex-col items-center justify-start relative focus:outline-none" tabindex="0">
+          
+          <!-- KHUNG TRANG ĐƠN (SINGLE PAGE WRAPPER) -->
+          <div id="page-wrapper" class="relative bg-white shadow-2xl rounded-sm transition-all duration-100 select-none mx-auto">
+            
+            <!-- Canvas render PDF chính bằng PDF.js -->
+            <canvas id="pdf-canvas" class="block"></canvas>
+
+            <!-- Lớp Text Layer chuẩn PDF.js để cho phép bôi đen văn bản -->
+            <div id="text-layer" class="textLayer"></div>
+
+            <!-- Lớp Highlight văn bản (tự động co giãn theo % page width/height) -->
+            <div id="highlight-layer"></div>
+
+            <!-- Lớp Chèn Ghi chú văn bản (Text Annotations) -->
+            <div id="annotation-layer"></div>
+
+            <!-- Vòng hào quang sáng khi nhảy tới Bookmark -->
+            <div id="page-flash-overlay" class="absolute inset-0 pointer-events-none transition-opacity duration-500 opacity-0 bg-indigo-500/10 ring-8 ring-indigo-500/50"></div>
+          </div>
+
+          <!-- KHUNG CHỨA TẤT CẢ CÁC TRANG CHO CHẾ ĐỘ CUỘN LIÊN TỤC (CONTINUOUS SCROLL) -->
+          <div id="continuous-pages-container" class="hidden flex flex-col items-center gap-6 w-full py-2">
+            <!-- Render động các trang dạng danh sách cuộn mượt mà -->
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- ======================================================== -->
+    <!-- 2.3 RIGHT SIDE PANEL: MỤC LỤC, HIGHLIGHTS & GHI CHÚ      -->
+    <!-- ======================================================== -->
+    <!-- BACKDROP CHO RIGHT PANEL TRÊN MOBILE -->
+    <div id="panel-backdrop" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 hidden transition-opacity opacity-0" onclick="toggleRightPanel(false)"></div>
+
+    <aside id="reader-right-panel" class="fixed inset-y-0 right-0 w-84 max-w-[85vw] bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 z-50 flex flex-col transform translate-x-full transition-transform duration-300 ease-in-out shadow-2xl">
+      <!-- Header Right Panel -->
+      <div class="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+        <span class="font-bold text-sm tracking-wide text-slate-800 dark:text-slate-100 uppercase">Mục lục & Điểm nhấn</span>
+        <button class="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" onclick="toggleRightPanel(false)">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Tab Chuyển đổi: Outline / Bookmarks / Highlights -->
+      <div class="flex border-b border-slate-200 dark:border-slate-800 p-1.5 bg-slate-50 dark:bg-slate-950/50">
+        <button id="tab-btn-outline" class="flex-1 py-1.5 text-xs font-semibold rounded-lg text-slate-500 hover:text-indigo-600 transition-all truncate" onclick="switchRightTab('outline')">
+          Mục lục (<span id="count-outline">0</span>)
+        </button>
+        <button id="tab-btn-bookmarks" class="flex-1 py-1.5 text-xs font-semibold rounded-lg text-indigo-600 dark:text-indigo-400 bg-white dark:bg-slate-800 shadow-sm transition-all truncate" onclick="switchRightTab('bookmarks')">
+          Bookmarks (<span id="count-bookmarks">0</span>)
+        </button>
+        <button id="tab-btn-highlights" class="flex-1 py-1.5 text-xs font-semibold rounded-lg text-slate-500 hover:text-indigo-600 transition-all truncate" onclick="switchRightTab('highlights')">
+          Highlights (<span id="count-highlights">0</span>)
+        </button>
+      </div>
+
+      <!-- NỘI DUNG TAB 0: MỤC LỤC GỐC (PDF OUTLINE / TABLE OF CONTENTS) -->
+      <div id="tab-content-outline" class="flex-1 overflow-y-auto p-3 space-y-2 hidden">
+        <div id="outline-tree-list" class="space-y-1">
+          <!-- Render danh sách mục lục gốc từ PDF -->
+        </div>
+      </div>
+
+      <!-- NỘI DUNG TAB 1: BOOKMARKS (MỤC LỤC CÁ NHÂN) -->
+      <div id="tab-content-bookmarks" class="flex-1 overflow-y-auto p-3 space-y-2">
+        <button onclick="openBookmarkModal()" class="w-full py-2.5 px-3 rounded-xl border border-dashed border-indigo-300 dark:border-indigo-700 bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 font-semibold text-xs flex items-center justify-center gap-1.5 hover:bg-indigo-100/50 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          Thêm Bookmark cho trang hiện tại
+        </button>
+        <div id="bookmarks-list-items" class="space-y-1.5 pt-2">
+          <!-- Render danh sách bookmark -->
+        </div>
+      </div>
+
+      <!-- NỘI DUNG TAB 2: HIGHLIGHTS (ĐIỂM NHẤN VĂN BẢN) -->
+      <div id="tab-content-highlights" class="flex-1 overflow-y-auto p-3 space-y-2 hidden">
+        <div class="text-[11px] text-slate-400 p-2 bg-slate-50 dark:bg-slate-800/40 rounded-xl leading-relaxed">
+          Mẹo: Dùng chuột hoặc ngón tay bôi đen đoạn chữ trên trang PDF để tạo Highlight màu sắc.
+        </div>
+        <div id="highlights-list-items" class="space-y-2 pt-1">
+          <!-- Render danh sách highlight -->
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- 3. FLOATING TOOLBAR: CHỌN MÀU HIGHLIGHT KHI BÔI ĐEN      -->
+  <!-- ======================================================== -->
+  <div id="floating-highlight-bar" class="fixed z-50 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 p-1.5 flex items-center gap-1.5 transition-all opacity-0 pointer-events-none scale-95 duration-150">
+    <span class="text-[11px] font-semibold text-slate-400 px-1 hidden sm:inline">Highlight:</span>
+    <!-- Vàng -->
+    <button onclick="applyHighlight('yellow')" class="w-7 h-7 rounded-xl bg-amber-300 hover:scale-110 active:scale-95 transition-transform flex items-center justify-center ring-2 ring-amber-400/30" title="Highlight Vàng"></button>
+    <!-- Xanh lá -->
+    <button onclick="applyHighlight('green')" class="w-7 h-7 rounded-xl bg-emerald-400 hover:scale-110 active:scale-95 transition-transform flex items-center justify-center ring-2 ring-emerald-500/30" title="Highlight Xanh lá"></button>
+    <!-- Hồng -->
+    <button onclick="applyHighlight('pink')" class="w-7 h-7 rounded-xl bg-pink-400 hover:scale-110 active:scale-95 transition-transform flex items-center justify-center ring-2 ring-pink-500/30" title="Highlight Hồng"></button>
+    <!-- Xanh dương -->
+    <button onclick="applyHighlight('blue')" class="w-7 h-7 rounded-xl bg-sky-400 hover:scale-110 active:scale-95 transition-transform flex items-center justify-center ring-2 ring-sky-500/30" title="Highlight Xanh dương"></button>
+    
+    <div class="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5"></div>
+    <button onclick="dismissHighlightBar()" class="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" title="Hủy bỏ">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- 4. MODAL DIALOGS (TẠO THƯ MỤC, BOOKMARK, DI CHUYỂN FILE) -->
+  <!-- ======================================================== -->
+  <!-- 4.1 MODAL: TẠO HOẶC ĐỔI TÊN THƯ MỤC -->
+  <div id="modal-folder" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden animate-fade-in">
+    <div class="bg-white dark:bg-slate-900 rounded-3xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 dark:border-slate-800">
+      <h3 id="modal-folder-title" class="text-base font-bold text-slate-800 dark:text-slate-100 mb-3">Tạo thư mục mới</h3>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Tên thư mục</label>
+          <input type="text" id="modal-folder-name" placeholder="ví dụ: Giáo trình Y khoa, Phác đồ..." class="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-700 dark:text-slate-200">
+        </div>
+        <div id="modal-folder-parent-wrapper">
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Thư mục cha</label>
+          <select id="modal-folder-parent" class="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-700 dark:text-slate-200">
+            <!-- Dynamic dropdown danh sách folder cha -->
+          </select>
+        </div>
+      </div>
+      <div class="flex items-center justify-end gap-2 mt-5">
+        <button onclick="closeFolderModal()" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">Hủy</button>
+        <button id="modal-folder-submit-btn" onclick="submitFolderForm()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-500/25 transition-all">Lưu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4.2 MODAL: THÊM / SỬA BOOKMARK -->
+  <div id="modal-bookmark" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden animate-fade-in">
+    <div class="bg-white dark:bg-slate-900 rounded-3xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 dark:border-slate-800">
+      <h3 class="text-base font-bold text-slate-800 dark:text-slate-100 mb-1">Thêm Bookmark</h3>
+      <p id="modal-bookmark-subtitle" class="text-xs text-slate-400 mb-3">Đánh dấu trang hiện tại</p>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Tiêu đề đánh dấu</label>
+          <input type="text" id="modal-bookmark-title" placeholder="ví dụ: Phác đồ điều trị liều cao, Bảng tra cứu..." class="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-700 dark:text-slate-200" onkeydown="if(event.key==='Enter') saveBookmarkFromModal()">
+        </div>
+      </div>
+      <div class="flex items-center justify-end gap-2 mt-5">
+        <button onclick="closeBookmarkModal()" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">Hủy</button>
+        <button onclick="saveBookmarkFromModal()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-500/25 transition-all">Lưu Bookmark</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4.3 MODAL: DI CHUYỂN FILE VÀO THƯ MỤC KHÁC -->
+  <div id="modal-move-file" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden animate-fade-in">
+    <div class="bg-white dark:bg-slate-900 rounded-3xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 dark:border-slate-800">
+      <h3 class="text-base font-bold text-slate-800 dark:text-slate-100 mb-2">Chuyển thư mục</h3>
+      <p id="modal-move-filename" class="text-xs text-slate-500 mb-3 truncate">Tệp tin</p>
+      <div>
+        <label class="block text-xs font-semibold text-slate-500 mb-1">Chọn thư mục đích</label>
+        <select id="modal-move-folder-select" class="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-700 dark:text-slate-200">
+          <!-- Danh sách thư mục -->
+        </select>
+      </div>
+      <div class="flex items-center justify-end gap-2 mt-5">
+        <button onclick="closeMoveModal()" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">Hủy</button>
+        <button onclick="submitMoveFile()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-500/25 transition-all">Xác nhận chuyển</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4.4 MODAL: ĐỔI TÊN TÀI LIỆU PDF -->
+  <div id="modal-rename-file" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden animate-fade-in">
+    <div class="bg-white dark:bg-slate-900 rounded-3xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 dark:border-slate-800">
+      <h3 class="text-base font-bold text-slate-800 dark:text-slate-100 mb-3">Đổi tên tài liệu PDF</h3>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Tên tệp mới</label>
+          <input type="text" id="modal-rename-filename" placeholder="ví dụ: Bao_cao_tai_chinh.pdf" class="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-700 dark:text-slate-200" onkeydown="if(event.key==='Enter') submitRenamePDF()">
+        </div>
+      </div>
+      <div class="flex items-center justify-end gap-2 mt-5">
+        <button onclick="closeRenameModal()" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">Hủy</button>
+        <button onclick="submitRenamePDF()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-500/25 transition-all">Lưu thay đổi</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST THÔNG BÁO NHANH -->
+  <div id="toast-container" class="fixed bottom-5 right-5 z-50 space-y-2 pointer-events-none"></div>
+
+  <!-- ======================================================== -->
+  <!-- 5. JAVASCRIPT TOÀN BỘ ỨNG DỤNG                            -->
+  <!-- ======================================================== -->
+  <script>
+    /**
+     * DocuFlow - Trình đọc & Quản lý PDF Cá nhân
+     * Mobile-first Single Page Application (GitHub Pages Ready)
+     */
+
+    // Khởi tạo PDF.js Worker qua CDN
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+
+    // ==========================================================
+    // 5.1 MODULE QUẢN LÝ DỮ LIỆU INDEXEDDB CHO FILE PDF
+    // ==========================================================
+    const DB_NAME = 'DocuFlowPDF_DB';
+    const DB_VERSION = 1;
+    const STORE_NAME = 'pdf_files';
+
+    let dbInstance = null;
+
+    function openDB() {
+      return new Promise((resolve, reject) => {
+        if (dbInstance) return resolve(dbInstance);
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+        request.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+            store.createIndex('folderId', 'folderId', { unique: false });
+            store.createIndex('uploadedAt', 'uploadedAt', { unique: false });
+          }
+        };
+
+        request.onsuccess = (e) => {
+          dbInstance = e.target.result;
+          resolve(dbInstance);
+        };
+
+        request.onerror = (e) => reject(e.target.error);
+      });
+    }
+
+    async function dbSavePDF(fileData) {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.put(fileData);
+        req.onsuccess = () => resolve(fileData);
+        req.onerror = (e) => reject(e.target.error);
+      });
+    }
+
+    async function dbGetPDF(id) {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.get(id);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = (e) => reject(e.target.error);
+      });
+    }
+
+    async function dbGetAllPDFs() {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = (e) => reject(e.target.error);
+      });
+    }
+
+    async function dbDeletePDF(id) {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.delete(id);
+        req.onsuccess = () => resolve(true);
+        req.onerror = (e) => reject(e.target.error);
+      });
+    }
+
+    async function dbUpdatePDFMeta(id, patch) {
+      const item = await dbGetPDF(id);
+      if (!item) return null;
+      const updated = { ...item, ...patch };
+      return await dbSavePDF(updated);
+    }
+
+    // ==========================================================
+    // 5.2 QUẢN TRỊ TRẠNG THÁI (STATE MANAGEMENT) QUA LOCALSTORAGE
+    // ==========================================================
+    const DEFAULT_FOLDERS = [
+      { id: 'root', name: 'Tất cả tài liệu', parentId: null, color: '#6366f1' },
+      { id: 'f_clinical', name: 'Phác đồ điều trị', parentId: 'root', color: '#10b981' },
+      { id: 'f_research', name: 'Nghiên cứu khoa học', parentId: 'root', color: '#f59e0b' }
+    ];
+
+    let state = {
+      folders: [],
+      currentFolderId: 'root',
+      currentFileId: null,
+      currentPdfDoc: null,
+      currentPage: 1,
+      totalPages: 1,
+      zoom: 1.0,
+      zoomMode: '1',
+      isTextToolActive: false,
+      textToolFormat: {
+        fontSize: 16,
+        color: '#0f172a',
+        isBold: false
+      },
+      searchKeyword: '',
+      isRendering: false,
+      renderTask: null,
+      allFiles: [],
+      pendingSelection: null,
+      rotation: 0,
+      scrollMode: 'single', // 'single' hoặc 'continuous'
+      pdfOutline: [],
+      searchMatches: [],
+      currentMatchIdx: -1
+    };
+
+    function loadLocalStorageData() {
+      // 1. Thư mục
+      const savedFolders = localStorage.getItem('docuflow_folders');
+      if (savedFolders) {
+        try { state.folders = JSON.parse(savedFolders); } catch(e) { state.folders = [...DEFAULT_FOLDERS]; }
+      } else {
+        state.folders = [...DEFAULT_FOLDERS];
+        saveFoldersToStorage();
+      }
+
+      // 2. Theme Dark / Light
+      const savedTheme = localStorage.getItem('docuflow_theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      applyTheme(savedTheme);
+    }
+
+    function saveFoldersToStorage() {
+      localStorage.setItem('docuflow_folders', JSON.stringify(state.folders));
+    }
+
+    function getHighlights(fileId) {
+      try {
+        return JSON.parse(localStorage.getItem(`docuflow_hl_${fileId}`) || '[]');
+      } catch(e) { return []; }
+    }
+
+    function saveHighlights(fileId, highlights) {
+      localStorage.setItem(`docuflow_hl_${fileId}`, JSON.stringify(highlights));
+    }
+
+    function getInsertedTexts(fileId) {
+      try {
+        return JSON.parse(localStorage.getItem(`docuflow_texts_${fileId}`) || '[]');
+      } catch(e) { return []; }
+    }
+
+    function saveInsertedTexts(fileId, texts) {
+      localStorage.setItem(`docuflow_texts_${fileId}`, JSON.stringify(texts));
+    }
+
+    function getBookmarks(fileId) {
+      try {
+        return JSON.parse(localStorage.getItem(`docuflow_bm_${fileId}`) || '[]');
+      } catch(e) { return []; }
+    }
+
+    function saveBookmarks(fileId, bookmarks) {
+      localStorage.setItem(`docuflow_bm_${fileId}`, JSON.stringify(bookmarks));
+    }
+
+    // ==========================================================
+    // 5.3 GIAO DIỆN THEME & THÔNG BÁO TOAST
+    // ==========================================================
+    function applyTheme(theme) {
+      if (theme === 'dark') {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+      localStorage.setItem('docuflow_theme', theme);
+    }
+
+    function toggleTheme() {
+      const isDark = document.documentElement.classList.contains('dark');
+      applyTheme(isDark ? 'light' : 'dark');
+      showToast(isDark ? 'Đã chuyển sang chế độ sáng' : 'Đã chuyển sang chế độ tối');
+    }
+
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = 'px-4 py-2.5 rounded-2xl shadow-xl text-xs sm:text-sm font-semibold flex items-center gap-2 transform transition-all duration-300 translate-y-3 opacity-0 pointer-events-auto bg-slate-900 text-white dark:bg-white dark:text-slate-900 border border-slate-700/30';
+      
+      let icon = `<svg class="w-4 h-4 text-emerald-400 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>`;
+      if (type === 'error') {
+        icon = `<svg class="w-4 h-4 text-rose-400 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>`;
+      }
+
+      toast.innerHTML = `${icon} <span>${message}</span>`;
+      container.appendChild(toast);
+
+      requestAnimationFrame(() => {
+        toast.classList.remove('translate-y-3', 'opacity-0');
+      });
+
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-y-2');
+        setTimeout(() => toast.remove(), 300);
+      }, 2600);
+    }
+
+    // ==========================================================
+    // 5.4 QUẢN LÝ SIDEBAR & DRAWER RESPONSIVE
+    // ==========================================================
+    const sidebarDrawer = document.getElementById('sidebar-drawer');
+    const sidebarBackdrop = document.getElementById('sidebar-backdrop');
+    const btnOpenSidebar = document.getElementById('btn-open-sidebar');
+
+    btnOpenSidebar.addEventListener('click', () => {
+      sidebarDrawer.classList.remove('-translate-x-full');
+      sidebarBackdrop.classList.remove('hidden');
+      setTimeout(() => sidebarBackdrop.classList.remove('opacity-0'), 10);
+    });
+
+    function closeSidebarDrawer() {
+      sidebarDrawer.classList.add('-translate-x-full');
+      sidebarBackdrop.classList.add('opacity-0');
+      setTimeout(() => sidebarBackdrop.classList.add('hidden'), 300);
+    }
+
+    // Right side panel toggle
+    const readerRightPanel = document.getElementById('reader-right-panel');
+    const panelBackdrop = document.getElementById('panel-backdrop');
+
+    function toggleRightPanel(forceState) {
+      const isVisible = !readerRightPanel.classList.contains('translate-x-full');
+      const targetState = forceState !== undefined ? forceState : !isVisible;
+
+      if (targetState) {
+        readerRightPanel.classList.remove('translate-x-full');
+        panelBackdrop.classList.remove('hidden');
+        setTimeout(() => panelBackdrop.classList.remove('opacity-0'), 10);
+      } else {
+        readerRightPanel.classList.add('translate-x-full');
+        panelBackdrop.classList.add('opacity-0');
+        setTimeout(() => panelBackdrop.classList.add('hidden'), 300);
+      }
+    }
+
+    function switchRightTab(tabName) {
+      ['outline', 'bookmarks', 'highlights'].forEach(t => {
+        const btn = document.getElementById(`tab-btn-${t}`);
+        const content = document.getElementById(`tab-content-${t}`);
+        if (!btn || !content) return;
+        if (t === tabName) {
+          btn.className = 'flex-1 py-1.5 text-xs font-semibold rounded-lg text-indigo-600 dark:text-indigo-400 bg-white dark:bg-slate-800 shadow-sm transition-all truncate';
+          content.classList.remove('hidden');
+        } else {
+          btn.className = 'flex-1 py-1.5 text-xs font-semibold rounded-lg text-slate-500 hover:text-indigo-600 transition-all truncate';
+          content.classList.add('hidden');
+        }
+      });
+    }
+
+    // ==========================================================
+    // 5.5 RENDER CÂY THƯ MỤC & DANH SÁCH FILE PDF
+    // ==========================================================
+    function renderFolderTree() {
+      const container = document.getElementById('folder-tree-list');
+      container.innerHTML = '';
+
+      // Hàm đệ quy render từng nhánh cây
+      function buildBranch(parentId = null, level = 0) {
+        const children = state.folders.filter(f => f.parentId === parentId);
+        children.forEach(folder => {
+          const isActive = state.currentFolderId === folder.id;
+          const count = folder.id === 'root'
+            ? state.allFiles.length 
+            : state.allFiles.filter(f => f.folderId === folder.id).length;
+
+          const item = document.createElement('div');
+          item.className = `group flex items-center justify-between px-2.5 py-1.5 rounded-xl cursor-pointer text-xs font-medium transition-all ${
+            isActive 
+              ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-semibold shadow-xs' 
+              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+          }`;
+          item.style.paddingLeft = `${Math.max(10, level * 16 + 10)}px`;
+
+          item.innerHTML = `
+            <div class="flex items-center gap-2 truncate" onclick="selectFolder('${folder.id}')">
+              <svg class="w-4 h-4 shrink-0 ${isActive ? 'text-indigo-600' : 'text-slate-400'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+              </svg>
+              <span class="truncate">${folder.name}</span>
+            </div>
+            <div class="flex items-center gap-1 shrink-0">
+              <span class="text-[10px] px-1.5 py-0.5 rounded-full ${isActive ? 'bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'}">${count}</span>
+              ${folder.id !== 'root' ? `
+                <button class="opacity-0 group-hover:opacity-100 p-1 hover:text-indigo-600 text-slate-400" title="Đổi tên" onclick="event.stopPropagation(); openFolderModal('rename', '${folder.id}')">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                </button>
+                <button class="opacity-0 group-hover:opacity-100 p-1 hover:text-rose-500 text-slate-400" title="Xóa thư mục" onclick="event.stopPropagation(); deleteFolder('${folder.id}')">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                </button>
+              ` : ''}
+            </div>
+          `;
+          container.appendChild(item);
+          buildBranch(folder.id, level + 1);
+        });
+      }
+
+      buildBranch(null, 0);
+    }
+
+    function selectFolder(folderId) {
+      state.currentFolderId = folderId;
+      const f = state.folders.find(x => x.id === folderId);
+      document.getElementById('current-folder-badge').textContent = f ? f.name : 'Tất cả';
+      renderFolderTree();
+      renderFileList();
+    }
+
+    async function reloadFiles() {
+      state.allFiles = await dbGetAllPDFs();
+      renderFolderTree();
+      renderFileList();
+    }
+
+    function renderFileList() {
+      const container = document.getElementById('file-list-items');
+      container.innerHTML = '';
+
+      let files = state.allFiles;
+
+      // Lọc theo folder nếu không phải 'root'
+      if (state.currentFolderId !== 'root') {
+        files = files.filter(f => f.folderId === state.currentFolderId);
+      }
+
+      // Lọc theo từ khóa tìm kiếm
+      if (state.searchKeyword) {
+        const kw = state.searchKeyword.toLowerCase();
+        files = files.filter(f => f.name.toLowerCase().includes(kw));
+      }
+
+      document.getElementById('file-list-heading').textContent = `Danh sách tệp (${files.length})`;
+
+      if (files.length === 0) {
+        container.innerHTML = `
+          <div class="h-36 flex flex-col items-center justify-center text-center p-4 text-slate-400">
+            <svg class="w-8 h-8 mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+            <p class="text-xs">Không có tài liệu nào</p>
+          </div>
+        `;
+        return;
+      }
+
+      // Sắp xếp file mới nhất lên đầu
+      files.sort((a, b) => new Date(b.uploadedAt || 0) - new Date(a.uploadedAt || 0));
+
+      files.forEach(file => {
+        const isCurrent = state.currentFileId === file.id;
+        const sizeFormatted = (file.size / (1024 * 1024)).toFixed(1) + ' MB';
+        
+        const card = document.createElement('div');
+        card.className = `p-2.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-2.5 ${
+          isCurrent 
+            ? 'bg-indigo-50/80 dark:bg-indigo-950/60 border-indigo-400 dark:border-indigo-600 shadow-sm ring-1 ring-indigo-400/40' 
+            : 'bg-white dark:bg-slate-800/80 border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700/60 hover:bg-slate-50 dark:hover:bg-slate-800'
+        }`;
+
+        card.onclick = () => {
+          openPDFDocument(file.id);
+          // Tự động đóng drawer trên mobile khi chọn file
+          if (window.innerWidth < 1024) closeSidebarDrawer();
+        };
+
+        card.innerHTML = `
+          <div class="flex items-center gap-2.5 min-w-0">
+            <div class="w-8 h-8 rounded-xl shrink-0 flex items-center justify-center ${isCurrent ? 'bg-indigo-600 text-white' : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400'}">
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/></svg>
+            </div>
+            <div class="min-w-0">
+              <div class="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate" title="${file.name}">${file.name}</div>
+              <div class="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5">
+                <span>${sizeFormatted}</span>
+                <span>•</span>
+                <span>Trang ${file.lastReadPage || 1}</span>
+              </div>
+            </div>
+          </div>
+          <div class="flex items-center gap-1 shrink-0" onclick="event.stopPropagation()">
+            <!-- Nút đổi tên file -->
+            <button class="p-1 rounded-lg text-slate-400 hover:text-indigo-600 transition-colors" title="Đổi tên file" onclick="openRenameModal('${file.id}')">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+            </button>
+            <!-- Nút chuyển thư mục -->
+            <button class="p-1 rounded-lg text-slate-400 hover:text-indigo-600 transition-colors" title="Chuyển thư mục" onclick="openMoveModal('${file.id}')">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+            </button>
+            <!-- Nút xóa file -->
+            <button class="p-1 rounded-lg text-slate-400 hover:text-rose-500 transition-colors" title="Xóa file" onclick="deletePDFFile('${file.id}')">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function handleSearch(val) {
+      state.searchKeyword = val.trim();
+      const clearBtn = document.getElementById('search-clear-btn');
+      if (state.searchKeyword) {
+        clearBtn.classList.remove('hidden');
+      } else {
+        clearBtn.classList.add('hidden');
+      }
+      renderFileList();
+    }
+
+    function clearSearch() {
+      document.getElementById('search-input').value = '';
+      state.searchKeyword = '';
+      document.getElementById('search-clear-btn').classList.add('hidden');
+      renderFileList();
+    }
+
+    // ==========================================================
+    // 5.6 TẢI FILE PDF LÊN & LƯU VÀO INDEXEDDB
+    // ==========================================================
+    async function handleFileUpload(e) {
+      const files = Array.from(e.target.files || []);
+      if (!files.length) return;
+
+      for (const file of files) {
+        if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+          showToast(`Tệp "${file.name}" không phải là định dạng PDF hợp lệ`, 'error');
+          continue;
+        }
+
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          const newDoc = {
+            id: 'pdf_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8),
+            name: file.name,
+            size: file.size,
+            folderId: state.currentFolderId === 'root' ? 'root' : state.currentFolderId,
+            uploadedAt: new Date().toISOString(),
+            lastReadPage: 1,
+            data: arrayBuffer
+          };
+
+          await dbSavePDF(newDoc);
+          showToast(`Đã thêm thành công: ${file.name}`);
+          await reloadFiles();
+          
+          // Tự động mở file vừa tải lên
+          openPDFDocument(newDoc.id);
+        } catch (err) {
+          console.error(err);
+          showToast('Lỗi khi đọc file PDF từ thiết bị', 'error');
+        }
+      }
+
+      // Reset input để cho phép chọn lại cùng file
+      e.target.value = '';
+    }
+
+    async function deletePDFFile(id) {
+      if (!confirm('Bạn có chắc chắn muốn xóa tài liệu này khỏi bộ nhớ?')) return;
+      try {
+        await dbDeletePDF(id);
+        // Xóa highlights, bookmarks, và văn bản chèn đi kèm
+        localStorage.removeItem(`docuflow_hl_${id}`);
+        localStorage.removeItem(`docuflow_texts_${id}`);
+        localStorage.removeItem(`docuflow_bm_${id}`);
+
+        if (state.currentFileId === id) {
+          closeDocument();
+        }
+        showToast('Đã xóa tài liệu');
+        await reloadFiles();
+      } catch(err) {
+        console.error(err);
+        showToast('Lỗi khi xóa tài liệu', 'error');
+      }
+    }
+
+    // ==========================================================
+    // 5.7 TẠO TÀI LIỆU MẪU ĐỂ THỬ NGHIỆM NGAY TRÊN GITHUB PAGES
+    // ==========================================================
+    async function loadDemoSamplePDF() {
+      try {
+        // Sinh file PDF đa trang hoàn chỉnh bằng mã nhị phân tương thích PDF 1.4
+        const samplePdfData = buildSamplePDFBinary();
+        const demoDoc = {
+          id: 'pdf_sample_demo_doc',
+          name: 'Tai_Lieu_Huong_Dan_Mau.pdf',
+          size: samplePdfData.byteLength,
+          folderId: 'f_clinical',
+          uploadedAt: new Date().toISOString(),
+          lastReadPage: 1,
+          data: samplePdfData
+        };
+
+        await dbSavePDF(demoDoc);
+        showToast('Đã tải tài liệu mẫu!');
+        await reloadFiles();
+        openPDFDocument(demoDoc.id);
+      } catch (err) {
+        console.error(err);
+        showToast('Không thể tạo file mẫu', 'error');
+      }
+    }
+
+    function buildSamplePDFBinary() {
+      const objects = [];
+      function addObj(str) {
+        objects.push(str);
+        return objects.length;
+      }
+
+      addObj('<< /Type /Catalog /Pages 2 0 R /Outlines 10 0 R >>');
+      addObj('<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>');
+      addObj('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 6 0 R >> >> /Contents 7 0 R >>');
+      addObj('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 6 0 R >> >> /Contents 8 0 R >>');
+      addObj('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 6 0 R >> >> /Contents 9 0 R >>');
+      addObj('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+
+      const s1 = 'BT /F1 22 Tf 50 780 Td (DOCUFLOW - TRINH DOC & QUAN LY PDF) Tj /F1 13 Tf 0 -38 Td (Chao mung ban den voi ung dung DocuFlow PDF Reader!) Tj 0 -26 Td (Trang 1: Huong dan su dung tinh nang Highlight va Ghi chu.) Tj 0 -24 Td (1. Thu nghiem Highlight: Dung chuot hoac tay boi den doan van ban nay.) Tj 0 -24 Td (Thanh cong cu mau se xuat hien ngay tren man hinh de chon mau.) Tj 0 -24 Td (2. Thu nghiem Chen Chu: Chuyen qua Che Do Chen Chu tren thanh tren cung.) Tj 0 -24 Td (3. Thu nghiem Bookmark: Bam vao nut Bookmark de danh dau trang nay.) Tj ET';
+      addObj('<< /Length ' + s1.length + ' >>\nstream\n' + s1 + '\nendstream');
+
+      const s2 = 'BT /F1 22 Tf 50 780 Td (TRANG 2: BANG TRA CUU LIEU LUONG THUOC) Tj /F1 13 Tf 0 -38 Td (Phac do dieu tri tieu chuan y te va tra cuu lam sang nam 2026.) Tj 0 -26 Td (- Nhom A: 500mg moi ngay, uong sau khi an sang 30 phut.) Tj 0 -24 Td (- Nhom B: 250mg moi 12 gio, theo doi chi so huyet ap thuong xuyen.) Tj 0 -24 Td (- Nhom C: Theo chi dinh dac biet cua bac si chuyen khoa.) Tj 0 -26 Td (Goi y: Hay tao mot Bookmark cho trang nay voi tieu de [Bang Tra Cuu]!) Tj ET';
+      addObj('<< /Length ' + s2.length + ' >>\nstream\n' + s2 + '\nendstream');
+
+      const s3 = 'BT /F1 22 Tf 50 780 Td (TRANG 3: LUU TRU OFFLINE & DONG BO ZOOM) Tj /F1 13 Tf 0 -38 Td (Ung dung tich hop cac cong nghe hien dai:) Tj 0 -26 Td (- Luu tru IndexedDB: File PDF lon khong lo day bo nho localStorage.) Tj 0 -24 Td (- Zoom dong thong minh: Highlight va ghi chu tu dong co gian chinh xac.) Tj 0 -24 Td (- Mobile-first: Giao dien toi uu thao tac vuot, cham va xoay man hinh.) Tj 0 -24 Td (- Trien khai cuc ky de dang: Chi can 1 file index.html duy nhat!) Tj ET';
+      addObj('<< /Length ' + s3.length + ' >>\nstream\n' + s3 + '\nendstream');
+
+      // Các mục Outline (Mục lục tài liệu mẫu)
+      addObj('<< /Type /Outlines /First 11 0 R /Last 13 0 R /Count 3 >>');
+      addObj('<< /Title (Trang 1: Huong dan su dung) /Parent 10 0 R /Next 12 0 R /Dest [3 0 R /Fit] >>');
+      addObj('<< /Title (Trang 2: Bang tra cuu lieu luong) /Parent 10 0 R /Prev 11 0 R /Next 13 0 R /Dest [4 0 R /Fit] >>');
+      addObj('<< /Title (Trang 3: Luu tru offline & Zoom) /Parent 10 0 R /Prev 12 0 R /Dest [5 0 R /Fit] >>');
+
+      let pdf = '%PDF-1.4\n';
+      const offsets = [];
+      for (let i = 0; i < objects.length; i++) {
+        offsets.push(pdf.length);
+        pdf += (i + 1) + ' 0 obj\n' + objects[i] + '\nendobj\n';
+      }
+      const xrefOffset = pdf.length;
+      pdf += 'xref\n0 ' + (objects.length + 1) + '\n0000000000 65535 f \n';
+      for (let i = 0; i < offsets.length; i++) {
+        pdf += String(offsets[i]).padStart(10, '0') + ' 00000 n \n';
+      }
+      pdf += 'trailer\n<< /Size ' + (objects.length + 1) + ' /Root 1 0 R >>\nstartxref\n' + xrefOffset + '\n%%EOF';
+
+      // Chuyển chuỗi thành ArrayBuffer
+      const buffer = new ArrayBuffer(pdf.length);
+      const view = new Uint8Array(buffer);
+      for (let i = 0; i < pdf.length; i++) {
+        view[i] = pdf.charCodeAt(i);
+      }
+      return buffer;
+    }
+
+    // ==========================================================
+    // 5.8 TRÌNH ĐỌC PDF, RENDER CANVAS CỰC NÉT VÀ ZOOM ĐỘNG
+    // ==========================================================
+    async function openPDFDocument(fileId) {
+      try {
+        const fileRecord = await dbGetPDF(fileId);
+        if (!fileRecord || !fileRecord.data) {
+          showToast('Không tìm thấy dữ liệu PDF trong bộ nhớ', 'error');
+          return;
+        }
+
+        state.currentFileId = fileId;
+        state.rotation = 0;
+        document.getElementById('header-filename').textContent = fileRecord.name;
+        document.getElementById('header-filesize').textContent = `(${(fileRecord.size / (1024 * 1024)).toFixed(1)} MB)`;
+        
+        // Hiện UI đọc, ẩn empty state
+        document.getElementById('reader-empty-state').classList.add('hidden');
+        document.getElementById('reader-active-view').classList.remove('hidden');
+        document.getElementById('btn-toggle-panels').classList.remove('hidden');
+
+        // Hiện các nút chức năng trên Header
+        document.getElementById('btn-toggle-search-pdf')?.classList.remove('hidden');
+        document.getElementById('btn-download-pdf')?.classList.remove('hidden');
+        document.getElementById('btn-print-pdf')?.classList.remove('hidden');
+
+        // Nạp document bằng PDF.js
+        const loadingTask = pdfjsLib.getDocument({ data: fileRecord.data.slice(0) });
+        state.currentPdfDoc = await loadingTask.promise;
+        state.totalPages = state.currentPdfDoc.numPages;
+        state.currentPage = Math.min(state.totalPages, Math.max(1, fileRecord.lastReadPage || 1));
+
+        // Cập nhật thanh trượt trang
+        const pageSlider = document.getElementById('page-slider');
+        pageSlider.max = state.totalPages;
+        pageSlider.value = state.currentPage;
+
+        // Trích xuất Mục lục gốc (Outline)
+        await loadPDFOutline();
+
+        // Render theo chế độ đọc
+        updateScrollModeUI();
+        if (state.scrollMode === 'continuous') {
+          setupContinuousPages();
+        } else {
+          await renderCurrentPage();
+        }
+
+        updatePageControlsUI();
+        refreshRightPanelData();
+        renderFileList(); // Highlight file đang mở
+      } catch (err) {
+        console.error(err);
+        showToast('Lỗi khi mở và giải mã file PDF', 'error');
+      }
+    }
+
+    function closeDocument() {
+      state.currentFileId = null;
+      state.currentPdfDoc = null;
+      state.pdfOutline = [];
+      closePdfSearch();
+      document.getElementById('header-filename').textContent = 'Chưa mở tài liệu';
+      document.getElementById('header-filesize').textContent = '';
+      document.getElementById('reader-empty-state').classList.remove('hidden');
+      document.getElementById('reader-active-view').classList.add('hidden');
+      document.getElementById('btn-toggle-panels').classList.add('hidden');
+      document.getElementById('btn-toggle-search-pdf')?.classList.add('hidden');
+      document.getElementById('btn-download-pdf')?.classList.add('hidden');
+      document.getElementById('btn-print-pdf')?.classList.add('hidden');
+      toggleTextTool(false);
+      toggleRightPanel(false);
+      renderFileList();
+    }
+
+    /**
+     * Render trang PDF lên Canvas với DPI sắc nét + Text Layer + Highlight + Annotation Layer
+     */
+    async function renderCurrentPage() {
+      if (!state.currentPdfDoc || state.isRendering) return;
+      state.isRendering = true;
+
+      try {
+        if (state.renderTask) {
+          state.renderTask.cancel();
+          state.renderTask = null;
+        }
+
+        const page = await state.currentPdfDoc.getPage(state.currentPage);
+        const container = document.getElementById('pdf-scroll-container');
+        
+        // Tính toán tỉ lệ Scale có xét góc xoay
+        let scale = state.zoom;
+        const unscaledViewport = page.getViewport({ scale: 1.0, rotation: state.rotation });
+
+        if (state.zoomMode === 'fit-width') {
+          const availWidth = Math.max(300, container.clientWidth - 48);
+          scale = availWidth / unscaledViewport.width;
+        } else if (state.zoomMode === 'fit-page') {
+          const availWidth = Math.max(300, container.clientWidth - 48);
+          const availHeight = Math.max(300, container.clientHeight - 64);
+          scale = Math.min(availWidth / unscaledViewport.width, availHeight / unscaledViewport.height);
+        }
+
+        state.zoom = scale;
+        const viewport = page.getViewport({ scale: scale, rotation: state.rotation });
+
+        // Thiết lập kích thước Page Wrapper
+        const pageWrapper = document.getElementById('page-wrapper');
+        const canvas = document.getElementById('pdf-canvas');
+        const textLayer = document.getElementById('text-layer');
+
+        pageWrapper.style.width = `${Math.floor(viewport.width)}px`;
+        pageWrapper.style.height = `${Math.floor(viewport.height)}px`;
+
+        // Render Canvas với Retina DPR để chữ sắc nét tuyệt đối
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.floor(viewport.width * dpr);
+        canvas.height = Math.floor(viewport.height * dpr);
+        canvas.style.width = `${Math.floor(viewport.width)}px`;
+        canvas.style.height = `${Math.floor(viewport.height)}px`;
+
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        const renderContext = {
+          canvasContext: ctx,
+          viewport: viewport
+        };
+
+        state.renderTask = page.render(renderContext);
+        await state.renderTask.promise;
+        state.renderTask = null;
+
+        // Render Text Layer chuẩn PDF.js để cho phép bôi đen văn bản
+        textLayer.innerHTML = '';
+        textLayer.style.width = `${Math.floor(viewport.width)}px`;
+        textLayer.style.height = `${Math.floor(viewport.height)}px`;
+        textLayer.style.setProperty('--scale-factor', scale);
+
+        const textContent = await page.getTextContent();
+        await pdfjsLib.renderTextLayer({
+          textContentSource: textContent,
+          container: textLayer,
+          viewport: viewport,
+          textDivs: []
+        }).promise;
+
+        // Render các lớp phụ trợ (Highlight & Văn bản chèn trực tiếp)
+        renderHighlightsOnCanvas();
+        renderInsertedTextsOnCanvas();
+
+        // Lưu trang đọc gần nhất
+        if (state.currentFileId) {
+          dbUpdatePDFMeta(state.currentFileId, { lastReadPage: state.currentPage });
+        }
+      } catch (err) {
+        if (err?.name !== 'RenderingCancelledException') {
+          console.error('Lỗi khi render trang PDF:', err);
+        }
+      } finally {
+        state.isRendering = false;
+      }
+    }
+
+    // Xoay trang 90 độ theo chiều kim đồng hồ
+    function rotatePage() {
+      state.rotation = (state.rotation + 90) % 360;
+      showToast(`Đã xoay trang: ${state.rotation}°`);
+      if (state.scrollMode === 'continuous') {
+        setupContinuousPages();
+      } else {
+        renderCurrentPage();
+      }
+    }
+
+    // Chuyển chế độ xem Trang đơn vs Cuộn liên tục
+    function toggleScrollMode() {
+      state.scrollMode = (state.scrollMode === 'single') ? 'continuous' : 'single';
+      updateScrollModeUI();
+
+      const singleWrapper = document.getElementById('page-wrapper');
+      const contContainer = document.getElementById('continuous-pages-container');
+
+      if (state.scrollMode === 'continuous') {
+        singleWrapper.classList.add('hidden');
+        contContainer.classList.remove('hidden');
+        setupContinuousPages();
+        showToast('Đã bật Chế độ Cuộn liên tục');
+      } else {
+        contContainer.classList.add('hidden');
+        singleWrapper.classList.remove('hidden');
+        renderCurrentPage();
+        showToast('Đã bật Chế độ Trang đơn');
+      }
+    }
+
+    function updateScrollModeUI() {
+      const label = document.getElementById('label-scroll-mode');
+      const btn = document.getElementById('btn-toggle-scroll-mode');
+      if (label) {
+        label.textContent = state.scrollMode === 'continuous' ? 'Cuộn dọc' : 'Trang đơn';
+      }
+      if (btn) {
+        if (state.scrollMode === 'continuous') {
+          btn.classList.add('bg-indigo-50', 'dark:bg-indigo-950/60', 'text-indigo-600', 'dark:text-indigo-400');
+        } else {
+          btn.classList.remove('bg-indigo-50', 'dark:bg-indigo-950/60', 'text-indigo-600', 'dark:text-indigo-400');
+        }
+      }
+    }
+
+    let continuousObserver = null;
+
+    function setupContinuousPages() {
+      const container = document.getElementById('continuous-pages-container');
+      container.innerHTML = '';
+      if (!state.currentPdfDoc) return;
+
+      if (continuousObserver) {
+        continuousObserver.disconnect();
+      }
+
+      // Tạo các slot trang
+      for (let p = 1; p <= state.totalPages; p++) {
+        const pageBox = document.createElement('div');
+        pageBox.id = `cont-page-${p}`;
+        pageBox.dataset.pageNum = p;
+        pageBox.className = 'continuous-page-wrapper relative bg-white shadow-xl rounded-sm transition-all min-h-[400px] flex items-center justify-center';
+        pageBox.innerHTML = `
+          <div class="cont-loading text-xs text-slate-400 flex items-center gap-2 py-20">
+            <svg class="animate-spin w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>
+            <span>Đang tải trang ${p}...</span>
+          </div>
+          <canvas class="cont-canvas block hidden"></canvas>
+          <div class="cont-text-layer textLayer"></div>
+          <div class="cont-highlight-layer" style="position:absolute; inset:0; pointer-events:none; z-index:4;"></div>
+          <div class="cont-annotation-layer" style="position:absolute; inset:0; z-index:10;"></div>
+          <div class="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-black/60 text-white text-[10px] font-mono pointer-events-none z-20">Trang ${p} / ${state.totalPages}</div>
+        `;
+        container.appendChild(pageBox);
+      }
+
+      // Sử dụng IntersectionObserver để lazy render các trang khi cuộn tới
+      continuousObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            const pageNum = parseInt(entry.target.dataset.pageNum, 10);
+            renderContinuousPage(pageNum, entry.target);
+            if (entry.intersectionRatio > 0.4) {
+              state.currentPage = pageNum;
+              updatePageControlsUI();
+            }
+          }
+        });
+      }, {
+        root: document.getElementById('pdf-scroll-container'),
+        threshold: [0.1, 0.5]
+      });
+
+      document.querySelectorAll('.continuous-page-wrapper').forEach(box => {
+        continuousObserver.observe(box);
+      });
+
+      // Cuộn đến trang hiện tại
+      scrollToPageInContinuous(state.currentPage);
+    }
+
+    async function renderContinuousPage(pageNum, wrapperEl) {
+      if (wrapperEl.dataset.rendered === 'true' || !state.currentPdfDoc) return;
+      wrapperEl.dataset.rendered = 'true';
+
+      try {
+        const page = await state.currentPdfDoc.getPage(pageNum);
+        const container = document.getElementById('pdf-scroll-container');
+        const unscaledViewport = page.getViewport({ scale: 1.0, rotation: state.rotation });
+
+        let scale = state.zoom;
+        if (state.zoomMode === 'fit-width') {
+          const availWidth = Math.max(300, container.clientWidth - 48);
+          scale = availWidth / unscaledViewport.width;
+        } else if (state.zoomMode === 'fit-page') {
+          const availWidth = Math.max(300, container.clientWidth - 48);
+          const availHeight = Math.max(300, container.clientHeight - 64);
+          scale = Math.min(availWidth / unscaledViewport.width, availHeight / unscaledViewport.height);
+        }
+
+        const viewport = page.getViewport({ scale: scale, rotation: state.rotation });
+
+        wrapperEl.style.width = `${Math.floor(viewport.width)}px`;
+        wrapperEl.style.height = `${Math.floor(viewport.height)}px`;
+        wrapperEl.style.minHeight = 'auto';
+
+        const loadingEl = wrapperEl.querySelector('.cont-loading');
+        if (loadingEl) loadingEl.remove();
+
+        const canvas = wrapperEl.querySelector('.cont-canvas');
+        canvas.classList.remove('hidden');
+
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.floor(viewport.width * dpr);
+        canvas.height = Math.floor(viewport.height * dpr);
+        canvas.style.width = `${Math.floor(viewport.width)}px`;
+        canvas.style.height = `${Math.floor(viewport.height)}px`;
+
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+
+        const textLayer = wrapperEl.querySelector('.cont-text-layer');
+        textLayer.innerHTML = '';
+        textLayer.style.width = `${Math.floor(viewport.width)}px`;
+        textLayer.style.height = `${Math.floor(viewport.height)}px`;
+        textLayer.style.setProperty('--scale-factor', scale);
+
+        const textContent = await page.getTextContent();
+        await pdfjsLib.renderTextLayer({
+          textContentSource: textContent,
+          container: textLayer,
+          viewport: viewport,
+          textDivs: []
+        }).promise;
+
+        // Render Highlights và Văn bản chèn trực tiếp cho trang này
+        renderHighlightsForContainer(pageNum, wrapperEl.querySelector('.cont-highlight-layer'));
+        renderInsertedTextsForContainer(pageNum, wrapperEl.querySelector('.cont-annotation-layer'), scale, wrapperEl);
+      } catch (err) {
+        if (err?.name !== 'RenderingCancelledException') {
+          console.error(`Lỗi render trang liên tục ${pageNum}:`, err);
+        }
+        wrapperEl.dataset.rendered = 'false';
+      }
+    }
+
+    function scrollToPageInContinuous(pageNum) {
+      const el = document.getElementById(`cont-page-${pageNum}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        state.currentPage = pageNum;
+        updatePageControlsUI();
+      }
+    }
+
+    function updatePageControlsUI() {
+      document.getElementById('current-page-input').value = state.currentPage;
+      document.getElementById('total-pages-text').textContent = state.totalPages;
+      document.getElementById('page-slider').value = state.currentPage;
+      document.getElementById('btn-prev-page').disabled = (state.currentPage <= 1);
+      document.getElementById('btn-next-page').disabled = (state.currentPage >= state.totalPages);
+
+      // Cập nhật biểu tượng Bookmark của trang hiện tại
+      const bookmarks = getBookmarks(state.currentFileId);
+      const isBookmarked = bookmarks.some(b => b.pageNumber === state.currentPage);
+      const starIcon = document.getElementById('icon-bookmark-star');
+      if (isBookmarked) {
+        starIcon.setAttribute('fill', 'currentColor');
+        starIcon.classList.add('text-amber-500');
+        starIcon.classList.remove('text-slate-400');
+      } else {
+        starIcon.setAttribute('fill', 'none');
+        starIcon.classList.remove('text-amber-500');
+        starIcon.classList.add('text-slate-400');
+      }
+    }
+
+    function prevPage() {
+      if (state.currentPage > 1) {
+        state.currentPage--;
+        if (state.scrollMode === 'continuous') {
+          scrollToPageInContinuous(state.currentPage);
+        } else {
+          renderCurrentPage();
+        }
+        updatePageControlsUI();
+      }
+    }
+
+    function nextPage() {
+      if (state.currentPage < state.totalPages) {
+        state.currentPage++;
+        if (state.scrollMode === 'continuous') {
+          scrollToPageInContinuous(state.currentPage);
+        } else {
+          renderCurrentPage();
+        }
+        updatePageControlsUI();
+      }
+    }
+
+    function jumpToPageInput(val) {
+      const pageNum = parseInt(val, 10);
+      if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= state.totalPages) {
+        state.currentPage = pageNum;
+        if (state.scrollMode === 'continuous') {
+          scrollToPageInContinuous(pageNum);
+        } else {
+          renderCurrentPage();
+        }
+        updatePageControlsUI();
+      } else {
+        document.getElementById('current-page-input').value = state.currentPage;
+      }
+    }
+
+    function handlePageSlider(val) {
+      jumpToPageInput(val);
+    }
+
+    // Điều khiển Zoom
+    function zoomIn() {
+      state.zoomMode = 'custom';
+      state.zoom = Math.min(3.0, (state.zoom + 0.25));
+      document.getElementById('zoom-select').value = '1';
+      if (state.scrollMode === 'continuous') setupContinuousPages(); else renderCurrentPage();
+    }
+
+    function zoomOut() {
+      state.zoomMode = 'custom';
+      state.zoom = Math.max(0.4, (state.zoom - 0.25));
+      document.getElementById('zoom-select').value = '1';
+      if (state.scrollMode === 'continuous') setupContinuousPages(); else renderCurrentPage();
+    }
+
+    function setZoom(scale) {
+      state.zoomMode = 'custom';
+      state.zoom = scale;
+      document.getElementById('zoom-select').value = String(scale);
+      if (state.scrollMode === 'continuous') setupContinuousPages(); else renderCurrentPage();
+    }
+
+    function handleZoomSelect(val) {
+      state.zoomMode = val;
+      if (val === 'fit-width' || val === 'fit-page') {
+        if (state.scrollMode === 'continuous') setupContinuousPages(); else renderCurrentPage();
+      } else {
+        state.zoom = parseFloat(val);
+        if (state.scrollMode === 'continuous') setupContinuousPages(); else renderCurrentPage();
+      }
+    }
+
+    // ==========================================================
+    // 5.8.1 MỤC LỤC GỐC CỦA TÀI LIỆU PDF (PDF OUTLINE)
+    // ==========================================================
+    async function loadPDFOutline() {
+      try {
+        if (!state.currentPdfDoc) return;
+        const outline = await state.currentPdfDoc.getOutline();
+        state.pdfOutline = outline || [];
+        renderPDFOutline();
+      } catch (err) {
+        console.warn('Lỗi đọc mục lục PDF:', err);
+        state.pdfOutline = [];
+        renderPDFOutline();
+      }
+    }
+
+    function renderPDFOutline() {
+      const container = document.getElementById('outline-tree-list');
+      const countEl = document.getElementById('count-outline');
+      if (!container) return;
+      container.innerHTML = '';
+
+      if (!state.pdfOutline || state.pdfOutline.length === 0) {
+        if (countEl) countEl.textContent = '0';
+        container.innerHTML = `
+          <div class="p-4 text-center text-xs text-slate-400">
+            <svg class="w-8 h-8 mx-auto mb-2 opacity-40 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+            <p class="font-medium text-slate-600 dark:text-slate-300 mb-1">Không có mục lục gốc</p>
+            <p class="text-[11px] leading-relaxed">Tài liệu này không có mục lục từ tác giả. Bạn có thể tự gắn Bookmark ở từng trang để tạo mục lục riêng.</p>
+          </div>
+        `;
+        return;
+      }
+
+      if (countEl) countEl.textContent = state.pdfOutline.length;
+
+      function renderBranch(items, level = 0) {
+        items.forEach(item => {
+          const itemEl = document.createElement('div');
+          itemEl.className = 'group flex items-center justify-between p-2 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer transition-colors';
+          itemEl.style.paddingLeft = `${level * 14 + 8}px`;
+
+          itemEl.innerHTML = `
+            <div class="flex items-center gap-2 truncate">
+              <svg class="w-3.5 h-3.5 text-indigo-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+              <span class="truncate" title="${item.title}">${item.title}</span>
+            </div>
+          `;
+
+          itemEl.onclick = async () => {
+            try {
+              let dest = item.dest;
+              if (typeof dest === 'string') {
+                dest = await state.currentPdfDoc.getDestination(dest);
+              }
+              if (Array.isArray(dest)) {
+                const pageIndex = await state.currentPdfDoc.getPageIndex(dest[0]);
+                const pageNum = pageIndex + 1;
+                if (state.scrollMode === 'continuous') {
+                  scrollToPageInContinuous(pageNum);
+                } else {
+                  state.currentPage = pageNum;
+                  await renderCurrentPage();
+                  updatePageControlsUI();
+                }
+                if (window.innerWidth < 1024) toggleRightPanel(false);
+              }
+            } catch (err) {
+              console.warn('Lỗi khi nhảy tới mục lục:', err);
+            }
+          };
+
+          container.appendChild(itemEl);
+
+          if (item.items && item.items.length > 0) {
+            renderBranch(item.items, level + 1);
+          }
+        });
+      }
+
+      renderBranch(state.pdfOutline, 0);
+    }
+
+    // ==========================================================
+    // 5.8.2 TÌM KIẾM TỪ KHÓA TRONG NỘI DUNG PDF
+    // ==========================================================
+    let searchDebounceTimeout = null;
+
+    function togglePdfSearch(forceOpen = null) {
+      const bar = document.getElementById('pdf-search-bar');
+      const input = document.getElementById('pdf-search-input');
+      const shouldOpen = forceOpen !== null ? forceOpen : bar.classList.contains('hidden');
+
+      if (shouldOpen) {
+        bar.classList.remove('hidden');
+        input.focus();
+        input.select();
+      } else {
+        closePdfSearch();
+      }
+    }
+
+    function closePdfSearch() {
+      const bar = document.getElementById('pdf-search-bar');
+      if (bar) bar.classList.add('hidden');
+      clearSearchHighlights();
+      state.searchMatches = [];
+      state.currentMatchIdx = -1;
+    }
+
+    function debounceSearchPdfText(val) {
+      clearTimeout(searchDebounceTimeout);
+      searchDebounceTimeout = setTimeout(() => {
+        executePdfSearch(val);
+      }, 300);
+    }
+
+    function handlePdfSearchKeydown(e) {
+      if (e.key === 'Enter') {
+        if (e.shiftKey) {
+          findPrevMatch();
+        } else {
+          findNextMatch();
+        }
+      } else if (e.key === 'Escape') {
+        closePdfSearch();
+      }
+    }
+
+    async function executePdfSearch(query) {
+      query = (query || '').trim();
+      const countEl = document.getElementById('pdf-search-match-count');
+      if (!query || !state.currentPdfDoc) {
+        state.searchMatches = [];
+        state.currentMatchIdx = -1;
+        if (countEl) countEl.textContent = '0 / 0';
+        clearSearchHighlights();
+        return;
+      }
+
+      if (countEl) countEl.textContent = '...';
+      const matches = [];
+      const qLower = query.toLowerCase();
+
+      for (let p = 1; p <= state.totalPages; p++) {
+        const page = await state.currentPdfDoc.getPage(p);
+        const textContent = await page.getTextContent();
+        const pageStr = textContent.items.map(it => it.str).join(' ');
+        let idx = pageStr.toLowerCase().indexOf(qLower);
+        while (idx !== -1) {
+          matches.push({ pageNumber: p });
+          idx = pageStr.toLowerCase().indexOf(qLower, idx + qLower.length);
+        }
+      }
+
+      state.searchMatches = matches;
+      if (matches.length > 0) {
+        state.currentMatchIdx = 0;
+        if (countEl) countEl.textContent = `1 / ${matches.length}`;
+        jumpToSearchMatch(0);
+      } else {
+        state.currentMatchIdx = -1;
+        if (countEl) countEl.textContent = '0 / 0';
+        clearSearchHighlights();
+        showToast('Không tìm thấy từ khóa nào', 'error');
+      }
+    }
+
+    function jumpToSearchMatch(matchIdx) {
+      const match = state.searchMatches[matchIdx];
+      if (!match) return;
+      const countEl = document.getElementById('pdf-search-match-count');
+      if (countEl) countEl.textContent = `${matchIdx + 1} / ${state.searchMatches.length}`;
+
+      const query = document.getElementById('pdf-search-input').value.trim();
+
+      if (state.scrollMode === 'continuous') {
+        scrollToPageInContinuous(match.pageNumber);
+        setTimeout(() => highlightSearchInPage(match.pageNumber, query), 300);
+      } else {
+        if (state.currentPage !== match.pageNumber) {
+          state.currentPage = match.pageNumber;
+          renderCurrentPage().then(() => highlightSearchInPage(match.pageNumber, query));
+          updatePageControlsUI();
+        } else {
+          highlightSearchInPage(match.pageNumber, query);
+        }
+      }
+    }
+
+    function findNextMatch() {
+      if (!state.searchMatches || state.searchMatches.length === 0) return;
+      state.currentMatchIdx = (state.currentMatchIdx + 1) % state.searchMatches.length;
+      jumpToSearchMatch(state.currentMatchIdx);
+    }
+
+    function findPrevMatch() {
+      if (!state.searchMatches || state.searchMatches.length === 0) return;
+      state.currentMatchIdx = (state.currentMatchIdx - 1 + state.searchMatches.length) % state.searchMatches.length;
+      jumpToSearchMatch(state.currentMatchIdx);
+    }
+
+    function highlightSearchInPage(pageNum, query) {
+      clearSearchHighlights();
+      if (!query) return;
+
+      const container = state.scrollMode === 'continuous'
+        ? document.querySelector(`#cont-page-${pageNum} .cont-text-layer`)
+        : document.getElementById('text-layer');
+      if (!container) return;
+
+      const spans = container.querySelectorAll('span');
+      const qLower = query.toLowerCase();
+      let firstFound = null;
+
+      spans.forEach(span => {
+        if (span.textContent.toLowerCase().includes(qLower)) {
+          span.style.backgroundColor = 'rgba(251, 191, 36, 0.85)';
+          span.style.color = '#1e1b4b';
+          span.style.borderRadius = '3px';
+          span.classList.add('pdf-search-mark');
+          if (!firstFound) firstFound = span;
+        }
+      });
+
+      if (firstFound) {
+        firstFound.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+
+    function clearSearchHighlights() {
+      document.querySelectorAll('.pdf-search-mark').forEach(span => {
+        span.style.backgroundColor = '';
+        span.style.color = '';
+        span.style.borderRadius = '';
+        span.classList.remove('pdf-search-mark');
+      });
+    }
+
+    // ==========================================================
+    // 5.8.3 XUẤT, TẢI VỀ, IN ẤN & TOÀN MÀN HÌNH
+    // ==========================================================
+    async function downloadCurrentPDF() {
+      if (!state.currentFileId) return;
+      try {
+        // Tự động lưu và nung các nội dung chữ mới vào nhị phân PDF trước khi tải
+        await saveAndBakePdfChanges(true);
+
+        const fileRecord = await dbGetPDF(state.currentFileId);
+        if (!fileRecord || !fileRecord.data) {
+          showToast('Không tìm thấy dữ liệu PDF để tải về', 'error');
+          return;
+        }
+        const blob = new Blob([fileRecord.data], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileRecord.name || 'document.pdf';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 1500);
+        showToast('Bắt đầu tải tài liệu PDF đã cập nhật về máy...');
+      } catch(err) {
+        console.error(err);
+        showToast('Lỗi khi tải file PDF về', 'error');
+      }
+    }
+
+    async function printCurrentPDF() {
+      if (!state.currentFileId) return;
+      try {
+        // Tự động lưu và nung các nội dung chữ mới vào nhị phân PDF trước khi in
+        await saveAndBakePdfChanges(true);
+
+        const fileRecord = await dbGetPDF(state.currentFileId);
+        if (!fileRecord || !fileRecord.data) {
+          showToast('Không tìm thấy dữ liệu để in', 'error');
+          return;
+        }
+        const blob = new Blob([fileRecord.data], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        iframe.src = url;
+        document.body.appendChild(iframe);
+        iframe.onload = () => {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          setTimeout(() => {
+            document.body.removeChild(iframe);
+            URL.revokeObjectURL(url);
+          }, 60000);
+        };
+        showToast('Đang chuẩn bị trang in...');
+      } catch (err) {
+        console.error(err);
+        showToast('Lỗi khi in tài liệu', 'error');
+      }
+    }
+
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().then(() => {
+          document.getElementById('icon-fullscreen-enter')?.classList.add('hidden');
+          document.getElementById('icon-fullscreen-exit')?.classList.remove('hidden');
+        }).catch(err => {
+          console.warn('Không thể vào chế độ toàn màn hình:', err);
+        });
+      } else {
+        document.exitFullscreen().then(() => {
+          document.getElementById('icon-fullscreen-enter')?.classList.remove('hidden');
+          document.getElementById('icon-fullscreen-exit')?.classList.add('hidden');
+        });
+      }
+    }
+
+    document.addEventListener('fullscreenchange', () => {
+      if (!document.fullscreenElement) {
+        document.getElementById('icon-fullscreen-enter')?.classList.remove('hidden');
+        document.getElementById('icon-fullscreen-exit')?.classList.add('hidden');
+      } else {
+        document.getElementById('icon-fullscreen-enter')?.classList.add('hidden');
+        document.getElementById('icon-fullscreen-exit')?.classList.remove('hidden');
+      }
+    });
+
+    // ==========================================================
+    // 5.9 CHẾ ĐỘ CHÈN VĂN BẢN TRỰC TIẾP VÀO PDF (TEXT TOOL)
+    // ==========================================================
+    function toggleTextTool(forceState) {
+      if (!state.currentFileId) {
+        showToast('Vui lòng mở một tài liệu PDF trước', 'error');
+        return;
+      }
+      const shouldActivate = (forceState !== undefined) ? forceState : !state.isTextToolActive;
+      state.isTextToolActive = shouldActivate;
+
+      const btn = document.getElementById('btn-tool-text');
+      const formatBar = document.getElementById('pdf-text-format-bar');
+      const layers = document.querySelectorAll('#annotation-layer, .cont-annotation-layer');
+
+      if (shouldActivate) {
+        btn?.classList.add('bg-indigo-600', 'text-white', 'shadow-sm');
+        btn?.classList.remove('hover:bg-slate-100', 'dark:hover:bg-slate-800', 'text-slate-700', 'dark:text-slate-200');
+        formatBar?.classList.remove('hidden');
+        layers.forEach(layer => layer.style.cursor = 'crosshair');
+        showToast('Chế độ chèn chữ: Nhấp chuột vào bất kỳ vị trí nào trên trang PDF để gõ nội dung');
+      } else {
+        btn?.classList.remove('bg-indigo-600', 'text-white', 'shadow-sm');
+        btn?.classList.add('hover:bg-slate-100', 'dark:hover:bg-slate-800', 'text-slate-700', 'dark:text-slate-200');
+        formatBar?.classList.add('hidden');
+        layers.forEach(layer => layer.style.cursor = 'default');
+      }
+    }
+
+    function setTextToolFontSize(size) {
+      state.textToolFormat.fontSize = parseInt(size, 10) || 16;
+    }
+
+    function setTextToolColor(hexColor) {
+      state.textToolFormat.color = hexColor;
+      document.querySelectorAll('.text-color-swatch').forEach(btn => {
+        if (btn.dataset.color === hexColor) {
+          btn.classList.add('border-indigo-500', 'scale-110');
+          btn.classList.remove('border-transparent');
+        } else {
+          btn.classList.remove('border-indigo-500', 'scale-110');
+          btn.classList.add('border-transparent');
+        }
+      });
+    }
+
+    function toggleTextToolBold() {
+      state.textToolFormat.isBold = !state.textToolFormat.isBold;
+      const btn = document.getElementById('btn-text-bold');
+      if (state.textToolFormat.isBold) {
+        btn.classList.add('bg-indigo-600', 'text-white');
+        btn.classList.remove('bg-white', 'dark:bg-slate-800', 'text-slate-700', 'dark:text-slate-200');
+      } else {
+        btn.classList.remove('bg-indigo-600', 'text-white');
+        btn.classList.add('bg-white', 'dark:bg-slate-800', 'text-slate-700', 'dark:text-slate-200');
+      }
+    }
+
+    // ==========================================================
+    // 5.10 TÍNH NĂNG HIGHLIGHT VĂN BẢN VỚI TỌA ĐỘ CO GIÃN THEO %
+    // ==========================================================
+    const floatingBar = document.getElementById('floating-highlight-bar');
+
+    document.addEventListener('selectionchange', () => {
+      // Chỉ xử lý khi có tương tác
+    });
+
+    const pageWrapper = document.getElementById('page-wrapper');
+
+    function checkTextSelection() {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed) {
+        dismissHighlightBar();
+        return;
+      }
+
+      const text = selection.toString().trim();
+      if (text.length === 0) {
+        dismissHighlightBar();
+        return;
+      }
+
+      const range = selection.getRangeAt(0);
+      const textLayer = range.commonAncestorContainer.nodeType === 1 
+        ? range.commonAncestorContainer.closest('.textLayer') 
+        : range.commonAncestorContainer.parentElement?.closest('.textLayer');
+      if (!textLayer) {
+        dismissHighlightBar();
+        return;
+      }
+
+      const rects = Array.from(range.getClientRects());
+      if (rects.length === 0) return;
+
+      const hostWrapper = textLayer.closest('#page-wrapper') || textLayer.closest('.continuous-page-wrapper');
+      if (!hostWrapper) return;
+      const targetPageNum = hostWrapper.dataset.pageNum ? parseInt(hostWrapper.dataset.pageNum, 10) : state.currentPage;
+      const pageRect = hostWrapper.getBoundingClientRect();
+
+      // Chuẩn hóa tọa độ theo phần trăm (%) của trang để không bị lệch khi Zoom
+      const normalizedRects = rects.map(r => ({
+        x: ((r.left - pageRect.left) / pageRect.width) * 100,
+        y: ((r.top - pageRect.top) / pageRect.height) * 100,
+        w: (r.width / pageRect.width) * 100,
+        h: (r.height / pageRect.height) * 100
+      })).filter(r => r.w > 0.05 && r.h > 0.05);
+
+      if (normalizedRects.length === 0) return;
+
+      state.pendingSelection = {
+        text: text,
+        pageNumber: targetPageNum,
+        rects: normalizedRects
+      };
+
+      // Đặt vị trí cho thanh Floating Highlight Bar
+      const lastRect = rects[rects.length - 1];
+      const barX = Math.max(10, Math.min(window.innerWidth - 220, lastRect.left + (lastRect.width / 2) - 100));
+      const barY = Math.max(65, lastRect.top - 46);
+
+      floatingBar.style.left = `${barX}px`;
+      floatingBar.style.top = `${barY}px`;
+      floatingBar.classList.remove('opacity-0', 'pointer-events-none', 'scale-95');
+    }
+
+    // Lắng nghe sự kiện nhả chuột và nhả cảm ứng
+    document.addEventListener('mouseup', () => setTimeout(checkTextSelection, 30));
+    document.addEventListener('touchend', () => setTimeout(checkTextSelection, 60));
+
+    function dismissHighlightBar() {
+      floatingBar.classList.add('opacity-0', 'pointer-events-none', 'scale-95');
+      state.pendingSelection = null;
+    }
+
+    function applyHighlight(colorKey) {
+      if (!state.pendingSelection || !state.currentFileId) return;
+
+      const highlights = getHighlights(state.currentFileId);
+      const newHl = {
+        id: 'hl_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        fileId: state.currentFileId,
+        pageNumber: state.pendingSelection.pageNumber,
+        text: state.pendingSelection.text,
+        color: colorKey,
+        rects: state.pendingSelection.rects,
+        createdAt: new Date().toISOString()
+      };
+
+      highlights.push(newHl);
+      saveHighlights(state.currentFileId, highlights);
+
+      dismissHighlightBar();
+      window.getSelection().removeAllRanges();
+
+      renderHighlightsOnCanvas();
+      refreshRightPanelData();
+      showToast('Đã lưu điểm nhấn văn bản');
+    }
+
+    function renderHighlightsOnCanvas() {
+      const container = document.getElementById('highlight-layer');
+      renderHighlightsForContainer(state.currentPage, container);
+      if (state.scrollMode === 'continuous') {
+        const contBox = document.querySelector(`#cont-page-${state.currentPage} .cont-highlight-layer`);
+        if (contBox) renderHighlightsForContainer(state.currentPage, contBox);
+      }
+    }
+
+    function renderHighlightsForContainer(pageNum, container) {
+      if (!container) return;
+      container.innerHTML = '';
+      if (!state.currentFileId) return;
+
+      const highlights = getHighlights(state.currentFileId).filter(h => h.pageNumber === pageNum);
+      const colorMap = {
+        yellow: 'rgba(253, 224, 71, 0.45)', // Vàng
+        green:  'rgba(74, 222, 128, 0.45)', // Xanh lá
+        pink:   'rgba(244, 114, 182, 0.45)', // Hồng
+        blue:   'rgba(96, 165, 250, 0.45)'   // Xanh dương
+      };
+
+      highlights.forEach(hl => {
+        hl.rects.forEach(r => {
+          const box = document.createElement('div');
+          box.className = 'absolute rounded-[2px] transition-all duration-300 highlight-box';
+          box.dataset.hlId = hl.id;
+          box.style.left = `${r.x}%`;
+          box.style.top = `${r.y}%`;
+          box.style.width = `${r.w}%`;
+          box.style.height = `${r.h}%`;
+          box.style.backgroundColor = colorMap[hl.color] || colorMap.yellow;
+          box.style.mixBlendMode = 'multiply';
+          container.appendChild(box);
+        });
+      });
+    }
+
+    function deleteHighlight(hlId) {
+      let highlights = getHighlights(state.currentFileId);
+      highlights = highlights.filter(h => h.id !== hlId);
+      saveHighlights(state.currentFileId, highlights);
+      renderHighlightsOnCanvas();
+      refreshRightPanelData();
+      showToast('Đã xóa điểm nhấn');
+    }
+
+    function jumpToHighlight(hlId, pageNumber) {
+      if (state.scrollMode === 'continuous') {
+        scrollToPageInContinuous(pageNumber);
+        setTimeout(() => flashHighlight(hlId), 300);
+      } else {
+        if (state.currentPage !== pageNumber) {
+          state.currentPage = pageNumber;
+          renderCurrentPage().then(() => flashHighlight(hlId));
+          updatePageControlsUI();
+        } else {
+          flashHighlight(hlId);
+        }
+      }
+      if (window.innerWidth < 1024) toggleRightPanel(false);
+    }
+
+    function flashHighlight(hlId) {
+      const boxes = document.querySelectorAll(`.highlight-box[data-hl-id="${hlId}"]`);
+      boxes.forEach(box => {
+        box.classList.add('ring-4', 'ring-indigo-500', 'animate-pulse');
+        box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => box.classList.remove('ring-4', 'ring-indigo-500', 'animate-pulse'), 2000);
+      });
+    }
+
+    // ==========================================================
+    // 5.11 CHÈN VĂN BẢN TRỰC TIẾP & LƯU NỘI DUNG VÀO FILE PDF
+    // ==========================================================
+    // Click vào trang PDF để gõ chữ trực tiếp khi ở Text Mode
+    document.addEventListener('click', (e) => {
+      if (!state.isTextToolActive) return;
+      if (e.target.closest('#pdf-text-format-bar') || e.target.closest('#btn-tool-text') || e.target.closest('.direct-pdf-text')) return;
+
+      const layer = e.target.closest('#annotation-layer, .cont-annotation-layer, #text-layer, .cont-text-layer, #pdf-canvas, .cont-canvas');
+      if (!layer) return;
+
+      const hostWrapper = layer.closest('#page-wrapper, .continuous-page-wrapper');
+      if (!hostWrapper) return;
+
+      const pageRect = hostWrapper.getBoundingClientRect();
+      const xPercent = ((e.clientX - pageRect.left) / pageRect.width) * 100;
+      const yPercent = ((e.clientY - pageRect.top) / pageRect.height) * 100;
+      const targetPage = hostWrapper.dataset.pageNum ? parseInt(hostWrapper.dataset.pageNum, 10) : state.currentPage;
+
+      // Tạo văn bản mới phẳng trực tiếp trên trang PDF
+      const newText = {
+        id: 'txt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        fileId: state.currentFileId,
+        pageNumber: targetPage,
+        xPercent: Math.max(0.5, Math.min(85, xPercent)),
+        yPercent: Math.max(0.5, Math.min(95, yPercent)),
+        text: '',
+        fontSize: state.textToolFormat.fontSize,
+        color: state.textToolFormat.color,
+        isBold: state.textToolFormat.isBold,
+        createdAt: new Date().toISOString()
+      };
+
+      const texts = getInsertedTexts(state.currentFileId);
+      texts.push(newText);
+      saveInsertedTexts(state.currentFileId, texts);
+
+      renderInsertedTextsOnCanvas();
+
+      // Mở ô gõ trực tiếp ngay lập tức
+      setTimeout(() => {
+        startEditingDirectText(newText.id);
+      }, 50);
+    });
+
+    function renderInsertedTextsOnCanvas() {
+      const container = document.getElementById('annotation-layer');
+      const pageWrap = document.getElementById('page-wrapper');
+      renderInsertedTextsForContainer(state.currentPage, container, state.zoom, pageWrap);
+      if (state.scrollMode === 'continuous') {
+        const contBox = document.querySelector(`#cont-page-${state.currentPage} .cont-annotation-layer`);
+        const contWrap = document.getElementById(`cont-page-${state.currentPage}`);
+        if (contBox && contWrap) renderInsertedTextsForContainer(state.currentPage, contBox, state.zoom, contWrap);
+      }
+    }
+
+    function renderInsertedTextsForContainer(pageNum, container, scale = 1.0, wrapperEl = null) {
+      if (!container) return;
+      container.innerHTML = '';
+      if (!state.currentFileId) return;
+
+      const texts = getInsertedTexts(state.currentFileId).filter(t => t.pageNumber === pageNum);
+      const parentWrap = wrapperEl || document.getElementById('page-wrapper');
+
+      texts.forEach(item => {
+        const el = document.createElement('div');
+        el.className = 'direct-pdf-text group absolute select-none';
+        el.dataset.textId = item.id;
+        el.style.left = `${item.xPercent}%`;
+        el.style.top = `${item.yPercent}%`;
+        el.style.zIndex = '25';
+
+        const scaledFontSize = Math.max(10, Math.round(item.fontSize * (scale / 1.0)));
+        const fontWeight = item.isBold ? 'bold' : 'normal';
+
+        el.innerHTML = `
+          <!-- Nội dung chữ phẳng mượt như chữ thật của PDF -->
+          <div class="direct-text-display min-w-[20px] px-1 py-0.5 rounded cursor-text leading-tight" 
+               style="font-size: ${scaledFontSize}px; color: ${item.color}; font-weight: ${fontWeight}; font-family: 'Inter', -apple-system, sans-serif; white-space: pre-wrap; word-break: break-word;">
+            ${escapeHtml(item.text) || '<span class="text-slate-400 italic text-[11px] select-none">(Nhấp để gõ chữ...)</span>'}
+          </div>
+
+          <!-- Thanh mini hover công cụ (Kéo, Sửa, Xóa) -->
+          <div class="text-hover-bar opacity-0 group-hover:opacity-100 absolute -top-7 left-0 flex items-center gap-1 bg-white/95 dark:bg-slate-900/95 border border-slate-200 dark:border-slate-700 shadow-md rounded-lg px-1.5 py-0.5 text-[10px] pointer-events-auto transition-opacity z-30">
+            <span class="text-drag-handle text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-move px-0.5 font-mono" title="Kéo di chuyển vị trí">⋮⋮</span>
+            <button onclick="event.stopPropagation(); startEditingDirectText('${item.id}')" class="text-slate-500 hover:text-indigo-600 px-0.5" title="Sửa chữ">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+            </button>
+            <button onclick="event.stopPropagation(); deleteDirectText('${item.id}')" class="text-slate-400 hover:text-rose-500 px-0.5" title="Xóa">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+          </div>
+        `;
+
+        el.onclick = (e) => {
+          e.stopPropagation();
+          startEditingDirectText(item.id);
+        };
+
+        setupDirectTextDraggable(el, item, parentWrap);
+        container.appendChild(el);
+      });
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function startEditingDirectText(textId) {
+      const el = document.querySelector(`.direct-pdf-text[data-text-id="${textId}"]`);
+      if (!el) return;
+      const texts = getInsertedTexts(state.currentFileId);
+      const item = texts.find(t => t.id === textId);
+      if (!item) return;
+
+      const display = el.querySelector('.direct-text-display');
+      if (!display) return;
+
+      const scaledFontSize = Math.max(10, Math.round(item.fontSize * (state.zoom / 1.0)));
+      display.innerHTML = `
+        <textarea class="direct-inline-input bg-transparent outline-none resize-none overflow-hidden p-0 m-0 border border-indigo-400/80 rounded"
+                  style="font-size: ${scaledFontSize}px; color: ${item.color}; font-weight: ${item.isBold ? 'bold' : 'normal'}; font-family: 'Inter', -apple-system, sans-serif; min-width: 60px; line-height: 1.25;"
+                  rows="1">${item.text || ''}</textarea>
+      `;
+
+      const input = display.querySelector('.direct-inline-input');
+      input.focus();
+      if (item.text) input.select();
+
+      function autoGrow() {
+        input.style.height = 'auto';
+        input.style.height = input.scrollHeight + 'px';
+        input.style.width = 'auto';
+        input.style.width = Math.max(80, input.scrollWidth + 10) + 'px';
+      }
+      autoGrow();
+      input.addEventListener('input', autoGrow);
+
+      let isFinished = false;
+      function finishEdit() {
+        if (isFinished) return;
+        isFinished = true;
+        const val = input.value.trim();
+        if (!val) {
+          deleteDirectText(textId);
+        } else {
+          item.text = val;
+          saveInsertedTexts(state.currentFileId, texts);
+          renderInsertedTextsOnCanvas();
+        }
+      }
+
+      input.addEventListener('blur', finishEdit);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          finishEdit();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          finishEdit();
+        }
+      });
+    }
+
+    function deleteDirectText(textId) {
+      let texts = getInsertedTexts(state.currentFileId);
+      texts = texts.filter(t => t.id !== textId);
+      saveInsertedTexts(state.currentFileId, texts);
+      renderInsertedTextsOnCanvas();
+      showToast('Đã xóa đoạn chữ');
+    }
+
+    function setupDirectTextDraggable(element, textItem, parentWrapper) {
+      const handle = element.querySelector('.text-drag-handle');
+      if (!handle) return;
+      let startX, startY, initialLeft, initialTop;
+      let isDragging = false;
+      const hostWrapper = parentWrapper || document.getElementById('page-wrapper');
+
+      function onPointerDown(e) {
+        isDragging = true;
+        const evt = e.touches ? e.touches[0] : e;
+        startX = evt.clientX;
+        startY = evt.clientY;
+        initialLeft = textItem.xPercent;
+        initialTop = textItem.yPercent;
+
+        document.addEventListener('mousemove', onPointerMove);
+        document.addEventListener('mouseup', onPointerUp);
+        document.addEventListener('touchmove', onPointerMove, { passive: false });
+        document.addEventListener('touchend', onPointerUp);
+      }
+
+      function onPointerMove(e) {
+        if (!isDragging) return;
+        if (e.cancelable) e.preventDefault();
+        const evt = e.touches ? e.touches[0] : e;
+        const pageRect = hostWrapper.getBoundingClientRect();
+
+        const deltaXPercent = ((evt.clientX - startX) / pageRect.width) * 100;
+        const deltaYPercent = ((evt.clientY - startY) / pageRect.height) * 100;
+
+        const newX = Math.max(0, Math.min(90, initialLeft + deltaXPercent));
+        const newY = Math.max(0, Math.min(95, initialTop + deltaYPercent));
+
+        element.style.left = `${newX}%`;
+        element.style.top = `${newY}%`;
+
+        textItem.xPercent = newX;
+        textItem.yPercent = newY;
+      }
+
+      function onPointerUp() {
+        if (!isDragging) return;
+        isDragging = false;
+        document.removeEventListener('mousemove', onPointerMove);
+        document.removeEventListener('mouseup', onPointerUp);
+        document.removeEventListener('touchmove', onPointerMove);
+        document.removeEventListener('touchend', onPointerUp);
+
+        const texts = getInsertedTexts(state.currentFileId);
+        const idx = texts.findIndex(t => t.id === textItem.id);
+        if (idx !== -1) {
+          texts[idx].xPercent = textItem.xPercent;
+          texts[idx].yPercent = textItem.yPercent;
+          saveInsertedTexts(state.currentFileId, texts);
+        }
+      }
+
+      handle.addEventListener('mousedown', onPointerDown);
+      handle.addEventListener('touchstart', onPointerDown, { passive: false });
+    }
+
+    /**
+     * Nung (Bake) vĩnh viễn các văn bản vừa chèn trực tiếp vào cấu trúc nhị phân của file PDF
+     */
+    async function saveAndBakePdfChanges(silent = false) {
+      if (!state.currentFileId || !state.currentPdfDoc) return;
+      const texts = getInsertedTexts(state.currentFileId);
+      if (texts.length === 0) {
+        if (!silent) showToast('Chưa có nội dung chữ mới nào cần lưu vào file PDF', 'info');
+        return;
+      }
+
+      if (!window.PDFLib) {
+        if (!silent) showToast('Đã lưu nội dung chữ vào bộ nhớ trình duyệt');
+        return;
+      }
+
+      try {
+        const fileRecord = await dbGetPDF(state.currentFileId);
+        if (!fileRecord || !fileRecord.data) return;
+
+        const pdfDoc = await PDFLib.PDFDocument.load(fileRecord.data.slice(0));
+        const pages = pdfDoc.getPages();
+
+        // Nhóm các text theo số trang
+        const pagesWithTexts = {};
+        texts.forEach(item => {
+          if (!pagesWithTexts[item.pageNumber]) pagesWithTexts[item.pageNumber] = [];
+          pagesWithTexts[item.pageNumber].push(item);
+        });
+
+        let totalBaked = 0;
+
+        for (const pageNumStr of Object.keys(pagesWithTexts)) {
+          const pageNum = parseInt(pageNumStr, 10);
+          const pIdx = pageNum - 1;
+          if (pIdx < 0 || pIdx >= pages.length) continue;
+
+          const pdfPage = pages[pIdx];
+          const { width, height } = pdfPage.getSize();
+          const itemsOnPage = pagesWithTexts[pageNum];
+
+          // Vẽ các chữ lên canvas trong suốt độ phân giải cao 2x Retina
+          const scaleFactor = 2;
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(width * scaleFactor);
+          canvas.height = Math.round(height * scaleFactor);
+          const ctx = canvas.getContext('2d');
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          itemsOnPage.forEach(item => {
+            const fontPx = item.fontSize * scaleFactor;
+            ctx.font = `${item.isBold ? 'bold ' : ''}${fontPx}px Inter, -apple-system, sans-serif`;
+            ctx.fillStyle = item.color || '#0f172a';
+            ctx.textBaseline = 'top';
+
+            const px = (item.xPercent / 100) * canvas.width;
+            const py = (item.yPercent / 100) * canvas.height;
+
+            const lines = (item.text || '').split('\n');
+            lines.forEach((line, lineIdx) => {
+              ctx.fillText(line, px, py + (lineIdx * fontPx * 1.25));
+            });
+            totalBaked++;
+          });
+
+          // Nhúng Canvas dưới dạng ảnh PNG trong suốt vào trang PDF
+          const pngDataUrl = canvas.toDataURL('image/png');
+          const pngImage = await pdfDoc.embedPng(pngDataUrl);
+          pdfPage.drawImage(pngImage, {
+            x: 0,
+            y: 0,
+            width: width,
+            height: height
+          });
+        }
+
+        // Lưu nhị phân PDF mới
+        const modifiedBytes = await pdfDoc.save();
+        fileRecord.data = modifiedBytes.buffer;
+        fileRecord.size = modifiedBytes.byteLength;
+        await dbSavePDF(fileRecord);
+
+        // Xóa các văn bản đã nung khỏi danh sách tạm (vì giờ đã là nội dung thật của PDF)
+        saveInsertedTexts(state.currentFileId, []);
+
+        // Nạp lại PDF.js document với file PDF đã sửa đổi
+        const loadingTask = pdfjsLib.getDocument({ data: modifiedBytes.buffer.slice(0) });
+        state.currentPdfDoc = await loadingTask.promise;
+
+        // Render lại trang hiện tại để người dùng thấy nội dung đã trở thành 1 phần của file PDF
+        if (state.scrollMode === 'continuous') {
+          setupContinuousPages();
+        } else {
+          await renderCurrentPage();
+        }
+
+        // Đóng chế độ chèn chữ nếu đang mở
+        toggleTextTool(false);
+
+        if (!silent) {
+          showToast(`Đã lưu thành công ${totalBaked} đoạn văn bản trực tiếp vào file PDF!`);
+        }
+      } catch (err) {
+        console.error('Lỗi khi nung chữ vào PDF:', err);
+        if (!silent) showToast('Lỗi khi lưu chữ vào PDF: ' + err.message, 'error');
+      }
+    }
+
+    // ==========================================================
+    // 5.12 TẠO BOOKMARK & MỤC LỤC CÁ NHÂN
+    // ==========================================================
+    function openBookmarkModal() {
+      if (!state.currentFileId) {
+        showToast('Vui lòng mở một tài liệu PDF trước', 'error');
+        return;
+      }
+      document.getElementById('modal-bookmark-subtitle').textContent = `Đánh dấu trang ${state.currentPage}`;
+      
+      const bookmarks = getBookmarks(state.currentFileId);
+      const existing = bookmarks.find(b => b.pageNumber === state.currentPage);
+      document.getElementById('modal-bookmark-title').value = existing ? existing.title : `Ghi nhớ trang ${state.currentPage}`;
+
+      document.getElementById('modal-bookmark').classList.remove('hidden');
+      setTimeout(() => document.getElementById('modal-bookmark-title').focus(), 50);
+    }
+
+    function closeBookmarkModal() {
+      document.getElementById('modal-bookmark').classList.add('hidden');
+    }
+
+    function saveBookmarkFromModal() {
+      const title = document.getElementById('modal-bookmark-title').value.trim();
+      if (!title) {
+        showToast('Vui lòng nhập tiêu đề cho Bookmark', 'error');
+        return;
+      }
+
+      const bookmarks = getBookmarks(state.currentFileId);
+      const existingIdx = bookmarks.findIndex(b => b.pageNumber === state.currentPage);
+
+      if (existingIdx !== -1) {
+        bookmarks[existingIdx].title = title;
+      } else {
+        bookmarks.push({
+          id: 'bm_' + Date.now(),
+          fileId: state.currentFileId,
+          pageNumber: state.currentPage,
+          title: title,
+          createdAt: new Date().toISOString()
+        });
+      }
+
+      // Sắp xếp theo số trang
+      bookmarks.sort((a, b) => a.pageNumber - b.pageNumber);
+      saveBookmarks(state.currentFileId, bookmarks);
+
+      closeBookmarkModal();
+      updatePageControlsUI();
+      refreshRightPanelData();
+      showToast('Đã lưu Bookmark thành công');
+    }
+
+    function deleteBookmark(bmId) {
+      let bookmarks = getBookmarks(state.currentFileId);
+      bookmarks = bookmarks.filter(b => b.id !== bmId);
+      saveBookmarks(state.currentFileId, bookmarks);
+      updatePageControlsUI();
+      refreshRightPanelData();
+      showToast('Đã xóa Bookmark');
+    }
+
+    function jumpToBookmark(pageNumber) {
+      if (state.scrollMode === 'continuous') {
+        scrollToPageInContinuous(pageNumber);
+        setTimeout(triggerPageFlash, 300);
+      } else {
+        if (state.currentPage !== pageNumber) {
+          state.currentPage = pageNumber;
+          renderCurrentPage().then(triggerPageFlash);
+          updatePageControlsUI();
+        } else {
+          triggerPageFlash();
+        }
+      }
+      if (window.innerWidth < 1024) toggleRightPanel(false);
+    }
+
+    function triggerPageFlash() {
+      const overlay = document.getElementById('page-flash-overlay');
+      overlay.classList.remove('opacity-0');
+      setTimeout(() => overlay.classList.add('opacity-0'), 800);
+    }
+
+    // ==========================================================
+    // 5.13 CẬP NHẬT DỮ LIỆU BẢNG MỤC LỤC & GHI CHÚ BÊN PHẢI
+    // ==========================================================
+    function refreshRightPanelData() {
+      if (!state.currentFileId) return;
+
+      const bookmarks = getBookmarks(state.currentFileId);
+      const highlights = getHighlights(state.currentFileId);
+
+      // Cập nhật số lượng đếm trên Tab
+      document.getElementById('count-bookmarks').textContent = bookmarks.length;
+      document.getElementById('count-highlights').textContent = highlights.length;
+
+      // Cập nhật chấm thông báo trên header
+      const totalCount = bookmarks.length + highlights.length;
+      const badge = document.getElementById('panel-badge-count');
+      if (totalCount > 0) {
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
+
+      // 1. Render Bookmarks List
+      const bmContainer = document.getElementById('bookmarks-list-items');
+      bmContainer.innerHTML = '';
+      if (bookmarks.length === 0) {
+        bmContainer.innerHTML = '<p class="text-xs text-slate-400 text-center py-4">Chưa có Bookmark nào</p>';
+      } else {
+        bookmarks.forEach(bm => {
+          const item = document.createElement('div');
+          item.className = 'group flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-600 transition-all cursor-pointer';
+          item.onclick = () => jumpToBookmark(bm.pageNumber);
+          item.innerHTML = `
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 text-[10px] font-bold shrink-0">Trang ${bm.pageNumber}</span>
+              <span class="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">${bm.title}</span>
+            </div>
+            <button onclick="event.stopPropagation(); deleteBookmark('${bm.id}')" class="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-rose-500 rounded" title="Xóa">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+          `;
+          bmContainer.appendChild(item);
+        });
+      }
+
+      // 2. Render Highlights List
+      const hlContainer = document.getElementById('highlights-list-items');
+      hlContainer.innerHTML = '';
+      if (highlights.length === 0) {
+        hlContainer.innerHTML = '<p class="text-xs text-slate-400 text-center py-4">Chưa có đoạn Highlight nào</p>';
+      } else {
+        const colorBadge = {
+          yellow: 'bg-amber-400',
+          green:  'bg-emerald-400',
+          pink:   'bg-pink-400',
+          blue:   'bg-sky-400'
+        };
+
+        highlights.forEach(hl => {
+          const item = document.createElement('div');
+          item.className = 'group p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-600 transition-all cursor-pointer';
+          item.onclick = () => jumpToHighlight(hl.id, hl.pageNumber);
+          item.innerHTML = `
+            <div class="flex items-center justify-between mb-1">
+              <div class="flex items-center gap-1.5">
+                <span class="w-2.5 h-2.5 rounded-full ${colorBadge[hl.color] || 'bg-amber-400'}"></span>
+                <span class="text-[10px] font-bold text-slate-500">Trang ${hl.pageNumber}</span>
+              </div>
+              <button onclick="event.stopPropagation(); deleteHighlight('${hl.id}')" class="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-rose-500 rounded" title="Xóa">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+              </button>
+            </div>
+            <p class="text-xs text-slate-700 dark:text-slate-300 line-clamp-2 italic font-serif">"${hl.text}"</p>
+          `;
+          hlContainer.appendChild(item);
+        });
+      }
+    }
+
+    // ==========================================================
+    // 5.14 MODAL TẠO & QUẢN LÝ THƯ MỤC
+    // ==========================================================
+    let folderModalMode = 'create';
+    let folderTargetId = null;
+
+    function openFolderModal(mode = 'create', folderId = null) {
+      folderModalMode = mode;
+      folderTargetId = folderId;
+
+      const titleEl = document.getElementById('modal-folder-title');
+      const nameInput = document.getElementById('modal-folder-name');
+      const parentWrapper = document.getElementById('modal-folder-parent-wrapper');
+      const parentSelect = document.getElementById('modal-folder-parent');
+
+      if (mode === 'rename') {
+        titleEl.textContent = 'Đổi tên thư mục';
+        const folder = state.folders.find(f => f.id === folderId);
+        nameInput.value = folder ? folder.name : '';
+        parentWrapper.classList.add('hidden');
+      } else {
+        titleEl.textContent = 'Tạo thư mục mới';
+        nameInput.value = '';
+        parentWrapper.classList.remove('hidden');
+
+        // Điền danh sách thư mục cha
+        parentSelect.innerHTML = '<option value="root">Thư mục gốc (Gốc)</option>';
+        state.folders.filter(f => f.id !== 'root').forEach(f => {
+          parentSelect.innerHTML += `<option value="${f.id}">${f.name}</option>`;
+        });
+        parentSelect.value = state.currentFolderId === 'root' ? 'root' : state.currentFolderId;
+      }
+
+      document.getElementById('modal-folder').classList.remove('hidden');
+      setTimeout(() => nameInput.focus(), 50);
+    }
+
+    function closeFolderModal() {
+      document.getElementById('modal-folder').classList.add('hidden');
+    }
+
+    function submitFolderForm() {
+      const name = document.getElementById('modal-folder-name').value.trim();
+      if (!name) {
+        showToast('Vui lòng nhập tên thư mục', 'error');
+        return;
+      }
+
+      if (folderModalMode === 'rename') {
+        const folder = state.folders.find(f => f.id === folderTargetId);
+        if (folder) {
+          folder.name = name;
+          saveFoldersToStorage();
+          showToast('Đã đổi tên thư mục');
+        }
+      } else {
+        const parentId = document.getElementById('modal-folder-parent').value;
+        const newFolder = {
+          id: 'f_' + Date.now(),
+          name: name,
+          parentId: parentId === 'root' ? 'root' : parentId,
+          createdAt: new Date().toISOString()
+        };
+        state.folders.push(newFolder);
+        saveFoldersToStorage();
+        showToast('Đã tạo thư mục mới');
+      }
+
+      closeFolderModal();
+      renderFolderTree();
+    }
+
+    function deleteFolder(folderId) {
+      if (folderId === 'root') return;
+      if (!confirm('Bạn có chắc muốn xóa thư mục này? Các tệp bên trong sẽ được chuyển về thư mục gốc.')) return;
+
+      // Chuyển file thuộc thư mục này về 'root'
+      state.allFiles.forEach(async (file) => {
+        if (file.folderId === folderId) {
+          await dbUpdatePDFMeta(file.id, { folderId: 'root' });
+        }
+      });
+
+      // Xóa các thư mục con đệ quy
+      state.folders = state.folders.filter(f => f.id !== folderId && f.parentId !== folderId);
+      saveFoldersToStorage();
+
+      if (state.currentFolderId === folderId) {
+        state.currentFolderId = 'root';
+      }
+
+      showToast('Đã xóa thư mục');
+      reloadFiles();
+    }
+
+    // ==========================================================
+    // 5.15 MODAL CHUYỂN FILE GIỮA CÁC THƯ MỤC
+    // ==========================================================
+    let moveTargetFileId = null;
+
+    function openMoveModal(fileId) {
+      moveTargetFileId = fileId;
+      const file = state.allFiles.find(f => f.id === fileId);
+      if (!file) return;
+
+      document.getElementById('modal-move-filename').textContent = file.name;
+      const select = document.getElementById('modal-move-folder-select');
+      select.innerHTML = '<option value="root">Thư mục gốc (Tất cả)</option>';
+
+      state.folders.filter(f => f.id !== 'root').forEach(f => {
+        select.innerHTML += `<option value="${f.id}" ${f.id === file.folderId ? 'selected' : ''}>${f.name}</option>`;
+      });
+
+      document.getElementById('modal-move-file').classList.remove('hidden');
+    }
+
+    function closeMoveModal() {
+      document.getElementById('modal-move-file').classList.add('hidden');
+    }
+
+    async function submitMoveFile() {
+      if (!moveTargetFileId) return;
+      const targetFolderId = document.getElementById('modal-move-folder-select').value;
+      await dbUpdatePDFMeta(moveTargetFileId, { folderId: targetFolderId });
+      closeMoveModal();
+      showToast('Đã chuyển tệp sang thư mục mới');
+      await reloadFiles();
+    }
+
+    // ==========================================================
+    // 5.15.1 MODAL ĐỔI TÊN FILE PDF
+    // ==========================================================
+    let renameTargetFileId = null;
+
+    function openRenameModal(fileId) {
+      renameTargetFileId = fileId;
+      const file = state.allFiles.find(f => f.id === fileId);
+      if (!file) return;
+
+      const input = document.getElementById('modal-rename-filename');
+      input.value = file.name;
+      document.getElementById('modal-rename-file').classList.remove('hidden');
+      setTimeout(() => {
+        input.focus();
+        input.select();
+      }, 50);
+    }
+
+    function closeRenameModal() {
+      document.getElementById('modal-rename-file').classList.add('hidden');
+      renameTargetFileId = null;
+    }
+
+    async function submitRenamePDF() {
+      if (!renameTargetFileId) return;
+      let newName = document.getElementById('modal-rename-filename').value.trim();
+      if (!newName) {
+        showToast('Vui lòng nhập tên tệp', 'error');
+        return;
+      }
+      if (!newName.toLowerCase().endsWith('.pdf')) {
+        newName += '.pdf';
+      }
+
+      await dbUpdatePDFMeta(renameTargetFileId, { name: newName });
+      if (state.currentFileId === renameTargetFileId) {
+        document.getElementById('header-filename').textContent = newName;
+      }
+
+      closeRenameModal();
+      showToast('Đã đổi tên tệp thành công');
+      await reloadFiles();
+    }
+
+    // ==========================================================
+    // 5.16 PHÍM TẮT BÀN PHÍM (KEYBOARD NAVIGATION)
+    // ==========================================================
+    document.addEventListener('keydown', (e) => {
+      // Phím tắt tìm kiếm Ctrl+F / Cmd+F luôn kích hoạt khi đang mở tài liệu
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        if (state.currentFileId) {
+          e.preventDefault();
+          togglePdfSearch(true);
+        }
+        return;
+      }
+
+      // Phím Escape để đóng nhanh các modal, thanh tìm kiếm hoặc chế độ chèn chữ
+      if (e.key === 'Escape') {
+        closePdfSearch();
+        toggleTextTool(false);
+        closeFolderModal();
+        closeBookmarkModal();
+        closeMoveModal();
+        closeRenameModal();
+        if (window.innerWidth < 1024) {
+          closeSidebarDrawer();
+          toggleRightPanel(false);
+        }
+        return;
+      }
+
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        prevPage();
+      } else if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+        nextPage();
+      } else if (e.key === '+' || e.key === '=') {
+        zoomIn();
+      } else if (e.key === '-') {
+        zoomOut();
+      } else if (e.key === '0') {
+        setZoom(1);
+      } else if (e.key === 'r' || e.key === 'R') {
+        rotatePage();
+      } else if (e.key === 't' || e.key === 'T') {
+        toggleTextTool();
+      }
+    });
+
+    // ==========================================================
+    // 5.17 KHỞI TẠO ỨNG DỤNG LẦN ĐẦU (APP INITIALIZATION)
+    // ==========================================================
+    window.addEventListener('DOMContentLoaded', async () => {
+      loadLocalStorageData();
+      await openDB();
+      await reloadFiles();
+
+      // Nếu đã có file trong DB, tự động mở file đầu tiên để trải nghiệm ngay
+      if (state.allFiles.length > 0) {
+        openPDFDocument(state.allFiles[0].id);
+      }
+    });
+  </script>
+</body>
+</html>
