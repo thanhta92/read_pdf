@@ -1385,8 +1385,25 @@
         document.getElementById('btn-download-pdf')?.classList.remove('hidden');
         document.getElementById('btn-print-pdf')?.classList.remove('hidden');
 
+        // Chuẩn hóa dữ liệu nhị phân PDF tương thích mọi trường hợp (ArrayBuffer, Uint8Array, Blob)
+        let pdfDataBytes;
+        if (fileRecord.data instanceof Blob) {
+          const buf = await fileRecord.data.arrayBuffer();
+          pdfDataBytes = new Uint8Array(buf);
+        } else if (fileRecord.data instanceof Uint8Array) {
+          pdfDataBytes = new Uint8Array(fileRecord.data.buffer.slice(fileRecord.data.byteOffset, fileRecord.data.byteOffset + fileRecord.data.byteLength));
+        } else if (fileRecord.data instanceof ArrayBuffer) {
+          pdfDataBytes = new Uint8Array(fileRecord.data.slice(0));
+        } else if (fileRecord.data && fileRecord.data.buffer instanceof ArrayBuffer) {
+          const offset = fileRecord.data.byteOffset || 0;
+          const length = fileRecord.data.byteLength || fileRecord.data.length;
+          pdfDataBytes = new Uint8Array(fileRecord.data.buffer.slice(offset, offset + length));
+        } else {
+          pdfDataBytes = fileRecord.data;
+        }
+
         // Nạp document bằng PDF.js
-        const loadingTask = pdfjsLib.getDocument({ data: fileRecord.data.slice(0) });
+        const loadingTask = pdfjsLib.getDocument({ data: pdfDataBytes });
         state.currentPdfDoc = await loadingTask.promise;
         state.totalPages = state.currentPdfDoc.numPages;
         state.currentPage = Math.min(state.totalPages, Math.max(1, fileRecord.lastReadPage || 1));
@@ -2725,6 +2742,8 @@
         };
 
         setupDirectTextDraggable(el, item, parentWrap);
+        container.appendChild(el);
+      });
     }
 
     function escapeHtml(str) {
@@ -2875,9 +2894,22 @@
 
       try {
         const fileRecord = await dbGetPDF(state.currentFileId);
-        if (!fileRecord || !fileRecord.data) return;
+        let sourceBytes;
+        if (fileRecord.data instanceof Blob) {
+          sourceBytes = new Uint8Array(await fileRecord.data.arrayBuffer());
+        } else if (fileRecord.data instanceof Uint8Array) {
+          sourceBytes = new Uint8Array(fileRecord.data.buffer.slice(fileRecord.data.byteOffset, fileRecord.data.byteOffset + fileRecord.data.byteLength));
+        } else if (fileRecord.data instanceof ArrayBuffer) {
+          sourceBytes = new Uint8Array(fileRecord.data.slice(0));
+        } else if (fileRecord.data && fileRecord.data.buffer instanceof ArrayBuffer) {
+          const offset = fileRecord.data.byteOffset || 0;
+          const length = fileRecord.data.byteLength || fileRecord.data.length;
+          sourceBytes = new Uint8Array(fileRecord.data.buffer.slice(offset, offset + length));
+        } else {
+          sourceBytes = fileRecord.data;
+        }
 
-        const pdfDoc = await PDFLib.PDFDocument.load(fileRecord.data.slice(0));
+        const pdfDoc = await PDFLib.PDFDocument.load(sourceBytes);
         const pages = pdfDoc.getPages();
 
         // Nhóm các text theo số trang
@@ -2935,7 +2967,7 @@
 
         // Lưu nhị phân PDF mới
         const modifiedBytes = await pdfDoc.save();
-        fileRecord.data = modifiedBytes.buffer;
+        fileRecord.data = modifiedBytes.buffer.slice(modifiedBytes.byteOffset, modifiedBytes.byteOffset + modifiedBytes.byteLength);
         fileRecord.size = modifiedBytes.byteLength;
         await dbSavePDF(fileRecord);
 
@@ -2943,7 +2975,7 @@
         saveInsertedTexts(state.currentFileId, []);
 
         // Nạp lại PDF.js document với file PDF đã sửa đổi
-        const loadingTask = pdfjsLib.getDocument({ data: modifiedBytes.buffer.slice(0) });
+        const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileRecord.data.slice(0)) });
         state.currentPdfDoc = await loadingTask.promise;
 
         // Render lại trang hiện tại để người dùng thấy nội dung đã trở thành 1 phần của file PDF
