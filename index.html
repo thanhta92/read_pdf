@@ -95,12 +95,15 @@
       right: 0;
       bottom: 0;
       overflow: hidden;
-      opacity: 0.2;
+      opacity: 0.25;
       line-height: 1;
       text-size-adjust: none;
       forced-color-adjust: none;
       transform-origin: 0 0;
       z-index: 5;
+      user-select: text;
+      -webkit-user-select: text;
+      -webkit-touch-callout: default;
     }
     .textLayer span, .textLayer br {
       color: transparent;
@@ -108,26 +111,30 @@
       white-space: pre;
       cursor: text;
       transform-origin: 0% 0%;
+      user-select: text;
+      -webkit-user-select: text;
     }
     .textLayer ::selection {
       background: rgba(99, 102, 241, 0.4);
     }
 
     /* Lớp Highlight & Lớp Chèn Ghi Chú */
-    #highlight-layer {
+    #highlight-layer, .cont-highlight-layer {
       position: absolute;
       inset: 0;
       pointer-events: none;
       z-index: 4;
     }
-    #annotation-layer {
+    #annotation-layer, .cont-annotation-layer {
       position: absolute;
       inset: 0;
       z-index: 10;
+      pointer-events: none; /* Mặc định cho phép sự kiện chuột/chạm xuyên qua tới textLayer để bôi đen chữ */
     }
 
     /* Tùy biến chữ chèn trực tiếp phẳng trên trang PDF */
     .direct-pdf-text {
+      pointer-events: auto;
       touch-action: none;
     }
     .direct-pdf-text:hover .direct-text-display {
@@ -136,6 +143,22 @@
     }
     .direct-inline-input {
       user-select: text;
+    }
+
+    /* Chế độ bôi vùng (Area Highlight) */
+    .area-highlight-active, .area-highlight-active * {
+      cursor: crosshair !important;
+      user-select: none !important;
+      -webkit-user-select: none !important;
+    }
+    .area-selection-preview {
+      position: absolute;
+      border: 2px dashed #f59e0b;
+      background-color: rgba(253, 224, 71, 0.35);
+      pointer-events: none;
+      z-index: 50;
+      border-radius: 4px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.15);
     }
 
     /* Hiệu ứng nổi bật khi nhảy tới Bookmark hoặc Highlight */
@@ -447,6 +470,24 @@
               <svg class="w-4 h-4 text-indigo-600 dark:text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg>
               <span id="label-tool-text" class="hidden sm:inline">Chèn chữ</span>
             </button>
+
+            <!-- Nút 1: Bôi Highlight theo Chữ (Text Highlight - Dạng Icon trên mobile) -->
+            <button id="btn-tool-hl-text" class="p-2 sm:px-2.5 sm:py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 active:scale-95 transition-all flex items-center justify-center gap-1.5 shrink-0" title="Bôi Highlight theo chữ (H) - Giữ bôi liên tục" onclick="toggleHighlightMode('text')">
+              <svg class="w-4 h-4 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m9 11-6 6v3h3l6-6"/>
+                <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/>
+              </svg>
+              <span id="label-tool-hl-text" class="hidden sm:inline">Bôi chữ</span>
+            </button>
+
+            <!-- Nút 2: Bôi Highlight theo Vùng (Area Highlight - Dạng Icon trên mobile) -->
+            <button id="btn-tool-hl-area" class="p-2 sm:px-2.5 sm:py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 active:scale-95 transition-all flex items-center justify-center gap-1.5 shrink-0" title="Bôi Highlight theo vùng (A) - Kéo rê để bôi liên tục" onclick="toggleHighlightMode('area')">
+              <svg class="w-4 h-4 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 8V6a2 2 0 012-2h2M4 16v2a2 2 0 002 2h2M16 4h2a2 2 0 012 2v2M16 20h2a2 2 0 002-2v-2" />
+                <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" fill-opacity="0.35" stroke="currentColor" stroke-width="1.5"/>
+              </svg>
+              <span id="label-tool-hl-area" class="hidden sm:inline">Bôi vùng</span>
+            </button>
           </div>
 
           <!-- KHỐI 3: TIỆN ÍCH BOOKMARK (DẠNG ICON TRÊN MOBILE) -->
@@ -502,6 +543,34 @@
             </button>
             <button onclick="toggleTextTool(false)" class="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg" title="Thoát chế độ chèn chữ">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- THANH ĐIỀU KHIỂN BÚT HIGHLIGHT (HIGHLIGHT TOOLBAR) -->
+        <div id="pdf-highlight-bar" class="hidden h-11 bg-amber-50/95 dark:bg-slate-900/95 border-b border-amber-200/60 dark:border-slate-800 px-2 sm:px-5 flex items-center justify-between text-xs shrink-0 z-20 shadow-sm animate-fade-in gap-1 sm:gap-2 overflow-x-hidden sm:overflow-x-auto w-full">
+          <div class="flex items-center gap-1.5 sm:gap-3 shrink-0">
+            <span class="inline-flex items-center gap-1.5 font-semibold text-amber-800 dark:text-amber-300">
+              <span id="hl-mode-dot" class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+              <span id="hl-mode-title" class="hidden md:inline">Bôi chữ liên tục: Quét bôi đen chữ trên trang để tô màu</span>
+              <span id="hl-mode-title-sm" class="md:hidden text-[11px] font-bold">Bôi chữ:</span>
+            </span>
+            <div class="h-4 w-px bg-amber-200 dark:bg-slate-700 hidden sm:block"></div>
+            <!-- Chọn màu Highlight -->
+            <div class="flex items-center gap-1 sm:gap-1.5">
+              <button type="button" onclick="setHighlightToolColor('yellow')" class="hl-color-swatch w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-amber-300 border-2 border-indigo-600 shadow-sm transition-transform hover:scale-110 active:scale-95" data-color="yellow" title="Vàng"></button>
+              <button type="button" onclick="setHighlightToolColor('green')" class="hl-color-swatch w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-emerald-400 border-2 border-transparent shadow-sm transition-transform hover:scale-110 active:scale-95" data-color="green" title="Xanh lá"></button>
+              <button type="button" onclick="setHighlightToolColor('pink')" class="hl-color-swatch w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-pink-400 border-2 border-transparent shadow-sm transition-transform hover:scale-110 active:scale-95" data-color="pink" title="Hồng"></button>
+              <button type="button" onclick="setHighlightToolColor('blue')" class="hl-color-swatch w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-sky-400 border-2 border-transparent shadow-sm transition-transform hover:scale-110 active:scale-95" data-color="blue" title="Xanh dương"></button>
+            </div>
+          </div>
+          <div class="flex items-center gap-1 sm:gap-1.5 shrink-0">
+            <button onclick="openHighlightsPanel()" class="px-2 py-1 rounded-lg border border-amber-300 dark:border-slate-700 bg-white/80 dark:bg-slate-800 text-[11px] font-semibold text-amber-900 dark:text-amber-200 hover:bg-amber-100/50 transition-colors flex items-center gap-1" title="Xem danh sách các điểm nhấn đã lưu">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+              <span class="hidden sm:inline">Danh sách (<span id="highlight-bar-count">0</span>)</span>
+            </button>
+            <button onclick="toggleHighlightMode(null)" class="p-1 sm:px-2.5 sm:py-1 rounded-xl text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-200/50 dark:hover:bg-slate-800 text-xs font-semibold transition-all shrink-0" title="Tắt chế độ bôi Highlight">
+              ✕ <span class="hidden sm:inline">Tắt bôi</span>
             </button>
           </div>
         </div>
@@ -899,6 +968,9 @@
         color: '#0f172a',
         isBold: false
       },
+      highlightMode: null, // null | 'text' | 'area'
+      isHighlightToolActive: false,
+      selectedHighlightColor: 'yellow',
       searchKeyword: '',
       isRendering: false,
       renderTask: null,
@@ -1456,6 +1528,7 @@
       document.getElementById('btn-download-pdf')?.classList.add('hidden');
       document.getElementById('btn-print-pdf')?.classList.add('hidden');
       toggleTextTool(false);
+      setHighlightMode(null);
       toggleRightPanel(false);
       renderFileList();
     }
@@ -1636,7 +1709,7 @@
           <canvas class="cont-canvas block hidden"></canvas>
           <div class="cont-text-layer textLayer"></div>
           <div class="cont-highlight-layer" style="position:absolute; inset:0; pointer-events:none; z-index:4;"></div>
-          <div class="cont-annotation-layer" style="position:absolute; inset:0; z-index:10;"></div>
+          <div class="cont-annotation-layer" style="position:absolute; inset:0; pointer-events:none; z-index:10;"></div>
           <div class="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-black/60 text-white text-[10px] font-mono pointer-events-none z-20">Trang ${p} / ${state.totalPages}</div>
         `;
         container.appendChild(pageBox);
@@ -2220,6 +2293,12 @@
         return;
       }
       const shouldActivate = (forceState !== undefined) ? forceState : !state.isTextToolActive;
+      
+      // Nếu bật text tool thì tắt highlight mode
+      if (shouldActivate && state.highlightMode) {
+        setHighlightMode(null);
+      }
+
       state.isTextToolActive = shouldActivate;
 
       const btn = document.getElementById('btn-tool-text');
@@ -2230,13 +2309,19 @@
         btn?.classList.add('bg-indigo-600', 'text-white', 'shadow-sm');
         btn?.classList.remove('hover:bg-slate-100', 'dark:hover:bg-slate-800', 'text-slate-700', 'dark:text-slate-200');
         formatBar?.classList.remove('hidden');
-        layers.forEach(layer => layer.style.cursor = 'crosshair');
+        layers.forEach(layer => {
+          layer.style.pointerEvents = 'auto';
+          layer.style.cursor = 'crosshair';
+        });
         showToast('Chế độ chèn chữ: Nhấp chuột vào bất kỳ vị trí nào trên trang PDF để gõ nội dung');
       } else {
         btn?.classList.remove('bg-indigo-600', 'text-white', 'shadow-sm');
         btn?.classList.add('hover:bg-slate-100', 'dark:hover:bg-slate-800', 'text-slate-700', 'dark:text-slate-200');
         formatBar?.classList.add('hidden');
-        layers.forEach(layer => layer.style.cursor = 'default');
+        layers.forEach(layer => {
+          layer.style.pointerEvents = 'none';
+          layer.style.cursor = 'default';
+        });
       }
     }
 
@@ -2270,17 +2355,240 @@
     }
 
     // ==========================================================
-    // 5.10 TÍNH NĂNG HIGHLIGHT VĂN BẢN VỚI TỌA ĐỘ CO GIÃN THEO %
+    // 5.10 TÍNH NĂNG HIGHLIGHT (2 CHẾ ĐỘ: BÔI CHỮ & BÔI VÙNG LIÊN TỤC)
     // ==========================================================
     const floatingBar = document.getElementById('floating-highlight-bar');
 
-    document.addEventListener('selectionchange', () => {
-      // Chỉ xử lý khi có tương tác
-    });
+    function toggleHighlightMode(mode) {
+      if (!state.currentFileId) {
+        showToast('Vui lòng mở một tài liệu PDF trước', 'error');
+        return;
+      }
+      // Nhấp lại vào chế độ đang mở sẽ tắt chế độ đó
+      const nextMode = (state.highlightMode === mode) ? null : mode;
+      setHighlightMode(nextMode);
+    }
+
+    function setHighlightMode(mode) {
+      // Nếu bật bất kỳ chế độ bôi nào thì tắt chế độ chèn chữ
+      if (mode && state.isTextToolActive) {
+        toggleTextTool(false);
+      }
+
+      state.highlightMode = mode; // null | 'text' | 'area'
+      state.isHighlightToolActive = (mode !== null);
+
+      const btnText = document.getElementById('btn-tool-hl-text');
+      const btnArea = document.getElementById('btn-tool-hl-area');
+      const bar = document.getElementById('pdf-highlight-bar');
+      const dot = document.getElementById('hl-mode-dot');
+      const title = document.getElementById('hl-mode-title');
+      const titleSm = document.getElementById('hl-mode-title-sm');
+      const scrollContainer = document.getElementById('pdf-scroll-container');
+
+      // Reset giao diện cả 2 nút
+      btnText?.classList.remove('bg-amber-500', 'text-white', 'shadow-sm', 'border-amber-500');
+      btnText?.classList.add('hover:bg-slate-100', 'dark:hover:bg-slate-800', 'text-slate-700', 'dark:text-slate-200');
+      btnText?.querySelector('svg')?.classList.add('text-amber-500');
+      btnText?.querySelector('svg')?.classList.remove('text-white');
+
+      btnArea?.classList.remove('bg-emerald-600', 'text-white', 'shadow-sm', 'border-emerald-600');
+      btnArea?.classList.add('hover:bg-slate-100', 'dark:hover:bg-slate-800', 'text-slate-700', 'dark:text-slate-200');
+      btnArea?.querySelector('svg')?.classList.add('text-emerald-500');
+      btnArea?.querySelector('svg')?.classList.remove('text-white');
+
+      if (mode === 'text') {
+        btnText?.classList.add('bg-amber-500', 'text-white', 'shadow-sm', 'border-amber-500');
+        btnText?.classList.remove('hover:bg-slate-100', 'dark:hover:bg-slate-800', 'text-slate-700', 'dark:text-slate-200');
+        btnText?.querySelector('svg')?.classList.remove('text-amber-500');
+        btnText?.querySelector('svg')?.classList.add('text-white');
+
+        bar?.classList.remove('hidden');
+        if (dot) dot.className = 'w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse';
+        if (title) title.textContent = 'Bôi chữ liên tục: Quét bôi đen chữ trên trang để tô màu';
+        if (titleSm) titleSm.textContent = 'Bôi chữ:';
+
+        scrollContainer?.classList.remove('area-highlight-active');
+        showToast('Chế độ Bôi chữ: Quét chọn chữ trên trang để tô màu liên tục');
+      } else if (mode === 'area') {
+        btnArea?.classList.add('bg-emerald-600', 'text-white', 'shadow-sm', 'border-emerald-600');
+        btnArea?.classList.remove('hover:bg-slate-100', 'dark:hover:bg-slate-800', 'text-slate-700', 'dark:text-slate-200');
+        btnArea?.querySelector('svg')?.classList.remove('text-emerald-500');
+        btnArea?.querySelector('svg')?.classList.add('text-white');
+
+        bar?.classList.remove('hidden');
+        if (dot) dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse';
+        if (title) title.textContent = 'Bôi vùng liên tục: Nhấn giữ & kéo rê để vẽ vùng tô màu';
+        if (titleSm) titleSm.textContent = 'Bôi vùng:';
+
+        scrollContainer?.classList.add('area-highlight-active');
+        showToast('Chế độ Bôi vùng: Kéo rê chuột hoặc ngón tay để vẽ vùng tô màu liên tục');
+      } else {
+        bar?.classList.add('hidden');
+        scrollContainer?.classList.remove('area-highlight-active');
+      }
+    }
+
+    function setHighlightToolColor(colorKey) {
+      state.selectedHighlightColor = colorKey;
+      document.querySelectorAll('.hl-color-swatch').forEach(btn => {
+        if (btn.dataset.color === colorKey) {
+          btn.classList.add('border-indigo-600', 'scale-110');
+          btn.classList.remove('border-transparent');
+        } else {
+          btn.classList.remove('border-indigo-600', 'scale-110');
+          btn.classList.add('border-transparent');
+        }
+      });
+      const names = { yellow: 'Vàng', green: 'Xanh lá', pink: 'Hồng', blue: 'Xanh dương' };
+      showToast(`Màu Highlight: Đã chọn màu ${names[colorKey] || 'Vàng'}`);
+    }
+
+    function openHighlightsPanel() {
+      toggleRightPanel(true);
+      switchRightTab('highlights');
+    }
+
+    // XỬ LÝ KÉO THẢ VẼ VÙNG HIGHLIGHT (AREA HIGHLIGHT)
+    let areaDragState = null;
+
+    function initAreaHighlightHandlers() {
+      const container = document.getElementById('pdf-scroll-container');
+      if (!container) return;
+
+      function onStart(e) {
+        if (state.highlightMode !== 'area' || !state.currentFileId) return;
+
+        // Chỉ chấp nhận chuột trái hoặc 1 chạm cảm ứng
+        if (e.type === 'mousedown' && e.button !== 0) return;
+        if (e.type === 'touchstart' && e.touches.length !== 1) return;
+
+        const clientX = e.type === 'touchstart' ? e.touches[0].clientX : e.clientX;
+        const clientY = e.type === 'touchstart' ? e.touches[0].clientY : e.clientY;
+
+        const pageEl = e.target.closest('#page-wrapper, .continuous-page-wrapper');
+        if (!pageEl) return;
+
+        const pageNum = pageEl.dataset.pageNum ? parseInt(pageEl.dataset.pageNum, 10) : state.currentPage;
+        const pageRect = pageEl.getBoundingClientRect();
+
+        const startX = clientX - pageRect.left;
+        const startY = clientY - pageRect.top;
+
+        const preview = document.createElement('div');
+        preview.className = 'area-selection-preview';
+        const color = state.selectedHighlightColor || 'yellow';
+        const colorBorder = { yellow: '#d97706', green: '#059669', pink: '#db2777', blue: '#2563eb' };
+        const colorBg = {
+          yellow: 'rgba(253, 224, 71, 0.4)',
+          green:  'rgba(74, 222, 128, 0.4)',
+          pink:   'rgba(244, 114, 182, 0.4)',
+          blue:   'rgba(96, 165, 250, 0.4)'
+        };
+        preview.style.borderColor = colorBorder[color] || '#d97706';
+        preview.style.backgroundColor = colorBg[color] || 'rgba(253, 224, 71, 0.4)';
+        preview.style.left = `${startX}px`;
+        preview.style.top = `${startY}px`;
+        preview.style.width = '0px';
+        preview.style.height = '0px';
+        pageEl.appendChild(preview);
+
+        areaDragState = {
+          pageEl,
+          pageNum,
+          pageRect,
+          startX,
+          startY,
+          preview,
+          color
+        };
+
+        if (e.type === 'touchstart') {
+          e.preventDefault();
+        }
+      }
+
+      function onMove(e) {
+        if (!areaDragState) return;
+
+        const clientX = e.type === 'touchmove' ? e.touches[0].clientX : e.clientX;
+        const clientY = e.type === 'touchmove' ? e.touches[0].clientY : e.clientY;
+
+        const pageRect = areaDragState.pageEl.getBoundingClientRect();
+        const currentX = Math.max(0, Math.min(pageRect.width, clientX - pageRect.left));
+        const currentY = Math.max(0, Math.min(pageRect.height, clientY - pageRect.top));
+
+        const left = Math.min(areaDragState.startX, currentX);
+        const top = Math.min(areaDragState.startY, currentY);
+        const width = Math.abs(currentX - areaDragState.startX);
+        const height = Math.abs(currentY - areaDragState.startY);
+
+        areaDragState.preview.style.left = `${left}px`;
+        areaDragState.preview.style.top = `${top}px`;
+        areaDragState.preview.style.width = `${width}px`;
+        areaDragState.preview.style.height = `${height}px`;
+
+        if (e.type === 'touchmove') {
+          e.preventDefault();
+        }
+      }
+
+      function onEnd(e) {
+        if (!areaDragState) return;
+
+        const { pageEl, pageNum, pageRect, preview, color } = areaDragState;
+        const width = parseFloat(preview.style.width) || 0;
+        const height = parseFloat(preview.style.height) || 0;
+        const left = parseFloat(preview.style.left) || 0;
+        const top = parseFloat(preview.style.top) || 0;
+
+        preview.remove();
+        areaDragState = null;
+
+        // Vùng vẽ ít nhất 10x10 px để tránh kích nhầm
+        if (width >= 10 && height >= 10) {
+          const x = (left / pageRect.width) * 100;
+          const y = (top / pageRect.height) * 100;
+          const w = (width / pageRect.width) * 100;
+          const h = (height / pageRect.height) * 100;
+
+          const highlights = getHighlights(state.currentFileId);
+          const newHl = {
+            id: 'hl_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+            fileId: state.currentFileId,
+            pageNumber: pageNum,
+            text: `[Vùng chọn trang ${pageNum}]`,
+            color: color,
+            isArea: true,
+            rects: [{ x, y, w, h }],
+            createdAt: new Date().toISOString()
+          };
+
+          highlights.push(newHl);
+          saveHighlights(state.currentFileId, highlights);
+
+          renderHighlightsOnCanvas(pageNum);
+          refreshRightPanelData();
+          const names = { yellow: 'Vàng', green: 'Xanh lá', pink: 'Hồng', blue: 'Xanh dương' };
+          showToast(`Đã bôi vùng highlight (${names[color] || 'Vàng'}) - Giữ chế độ sẵn sàng bôi tiếp!`);
+        }
+      }
+
+      container.addEventListener('mousedown', onStart);
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onEnd);
+
+      container.addEventListener('touchstart', onStart, { passive: false });
+      window.addEventListener('touchmove', onMove, { passive: false });
+      window.addEventListener('touchend', onEnd);
+    }
 
     const pageWrapper = document.getElementById('page-wrapper');
 
     function checkTextSelection() {
+      // Nếu đang bật text tool hoặc đang ở chế độ bôi vùng thì không xử lý bôi chữ
+      if (state.isTextToolActive || state.highlightMode === 'area') return;
+
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed) {
         dismissHighlightBar();
@@ -2326,7 +2634,13 @@
         rects: normalizedRects
       };
 
-      // Đặt vị trí cho thanh Floating Highlight Bar
+      // Nếu đang bật Chế độ Bôi chữ: Tự động tô màu ngay lập tức và giữ chế độ bôi liên tục!
+      if (state.highlightMode === 'text') {
+        applyHighlight(state.selectedHighlightColor || 'yellow');
+        return;
+      }
+
+      // Đặt vị trí cho thanh Floating Highlight Bar khi chưa bật chế độ bôi chữ
       const lastRect = rects[rects.length - 1];
       const barX = Math.max(10, Math.min(window.innerWidth - 220, lastRect.left + (lastRect.width / 2) - 100));
       const barY = Math.max(65, lastRect.top - 46);
@@ -2337,8 +2651,8 @@
     }
 
     // Lắng nghe sự kiện nhả chuột và nhả cảm ứng
-    document.addEventListener('mouseup', () => setTimeout(checkTextSelection, 30));
-    document.addEventListener('touchend', () => setTimeout(checkTextSelection, 60));
+    document.addEventListener('mouseup', () => setTimeout(checkTextSelection, 40));
+    document.addEventListener('touchend', () => setTimeout(checkTextSelection, 80));
 
     function dismissHighlightBar() {
       floatingBar.classList.add('opacity-0', 'pointer-events-none', 'scale-95');
@@ -2355,6 +2669,7 @@
         pageNumber: state.pendingSelection.pageNumber,
         text: state.pendingSelection.text,
         color: colorKey,
+        isArea: false,
         rects: state.pendingSelection.rects,
         createdAt: new Date().toISOString()
       };
@@ -2365,17 +2680,26 @@
       dismissHighlightBar();
       window.getSelection().removeAllRanges();
 
-      renderHighlightsOnCanvas();
+      renderHighlightsOnCanvas(newHl.pageNumber);
       refreshRightPanelData();
-      showToast('Đã lưu điểm nhấn văn bản');
+      const names = { yellow: 'Vàng', green: 'Xanh lá', pink: 'Hồng', blue: 'Xanh dương' };
+      showToast(`Đã bôi chữ highlight (${names[colorKey] || 'Vàng'}) - Sẵn sàng bôi tiếp!`);
     }
 
-    function renderHighlightsOnCanvas() {
+    function renderHighlightsOnCanvas(targetPageNum) {
       const container = document.getElementById('highlight-layer');
-      renderHighlightsForContainer(state.currentPage, container);
+      if (container) renderHighlightsForContainer(state.currentPage, container);
       if (state.scrollMode === 'continuous') {
-        const contBox = document.querySelector(`#cont-page-${state.currentPage} .cont-highlight-layer`);
-        if (contBox) renderHighlightsForContainer(state.currentPage, contBox);
+        if (targetPageNum) {
+          const contBox = document.querySelector(`#cont-page-${targetPageNum} .cont-highlight-layer`);
+          if (contBox) renderHighlightsForContainer(targetPageNum, contBox);
+        } else {
+          document.querySelectorAll('.continuous-page-wrapper').forEach(box => {
+            const p = parseInt(box.dataset.pageNum, 10);
+            const contBox = box.querySelector('.cont-highlight-layer');
+            if (contBox) renderHighlightsForContainer(p, contBox);
+          });
+        }
       }
     }
 
@@ -2391,18 +2715,41 @@
         pink:   'rgba(244, 114, 182, 0.45)', // Hồng
         blue:   'rgba(96, 165, 250, 0.45)'   // Xanh dương
       };
+      const colorBorder = {
+        yellow: '#d97706',
+        green:  '#059669',
+        pink:   '#db2777',
+        blue:   '#2563eb'
+      };
 
       highlights.forEach(hl => {
         hl.rects.forEach(r => {
           const box = document.createElement('div');
-          box.className = 'absolute rounded-[2px] transition-all duration-300 highlight-box';
+          box.className = 'absolute rounded-[2px] transition-all duration-300 highlight-box cursor-pointer hover:opacity-80';
           box.dataset.hlId = hl.id;
+          box.title = hl.isArea 
+            ? `Điểm nhấn vùng trang ${hl.pageNumber} (Nhấp để xóa)` 
+            : `Điểm nhấn: "${hl.text.substring(0, 40)}..." (Nhấp để xóa)`;
           box.style.left = `${r.x}%`;
           box.style.top = `${r.y}%`;
           box.style.width = `${r.w}%`;
           box.style.height = `${r.h}%`;
           box.style.backgroundColor = colorMap[hl.color] || colorMap.yellow;
           box.style.mixBlendMode = 'multiply';
+          if (hl.isArea) {
+            box.style.border = `1.5px solid ${colorBorder[hl.color] || '#d97706'}`;
+            box.style.borderRadius = '4px';
+          }
+          box.style.pointerEvents = 'auto'; // Cho phép nhấp vào ô highlight để xóa
+          box.onclick = (e) => {
+            e.stopPropagation();
+            const msg = hl.isArea 
+              ? `Bạn có muốn xóa vùng highlight này ở trang ${hl.pageNumber} không?`
+              : `Bạn có muốn xóa điểm nhấn này không?\n\n"${hl.text.substring(0, 60)}..."`;
+            if (confirm(msg)) {
+              deleteHighlight(hl.id);
+            }
+          };
           container.appendChild(box);
         });
       });
@@ -2410,9 +2757,11 @@
 
     function deleteHighlight(hlId) {
       let highlights = getHighlights(state.currentFileId);
+      const targetHl = highlights.find(h => h.id === hlId);
+      const pageNum = targetHl?.pageNumber;
       highlights = highlights.filter(h => h.id !== hlId);
       saveHighlights(state.currentFileId, highlights);
-      renderHighlightsOnCanvas();
+      renderHighlightsOnCanvas(pageNum);
       refreshRightPanelData();
       showToast('Đã xóa điểm nhấn');
     }
@@ -3106,6 +3455,8 @@
       // Cập nhật số lượng đếm trên Tab
       document.getElementById('count-bookmarks').textContent = bookmarks.length;
       document.getElementById('count-highlights').textContent = highlights.length;
+      const barCount = document.getElementById('highlight-bar-count');
+      if (barCount) barCount.textContent = highlights.length;
 
       // Cập nhật chấm thông báo trên header
       const totalCount = bookmarks.length + highlights.length;
@@ -3160,13 +3511,13 @@
             <div class="flex items-center justify-between mb-1">
               <div class="flex items-center gap-1.5">
                 <span class="w-2.5 h-2.5 rounded-full ${colorBadge[hl.color] || 'bg-amber-400'}"></span>
-                <span class="text-[10px] font-bold text-slate-500">Trang ${hl.pageNumber}</span>
+                <span class="text-[10px] font-bold text-slate-500">Trang ${hl.pageNumber} • ${hl.isArea ? 'Vùng' : 'Chữ'}</span>
               </div>
               <button onclick="event.stopPropagation(); deleteHighlight('${hl.id}')" class="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-rose-500 rounded" title="Xóa">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
               </button>
             </div>
-            <p class="text-xs text-slate-700 dark:text-slate-300 line-clamp-2 italic font-serif">"${hl.text}"</p>
+            <p class="text-xs text-slate-700 dark:text-slate-300 line-clamp-2 italic font-serif">${hl.isArea ? 'Vùng highlight tự do' : `"${hl.text}"`}</p>
           `;
           hlContainer.appendChild(item);
         });
@@ -3360,10 +3711,11 @@
         return;
       }
 
-      // Phím Escape để đóng nhanh các modal, thanh tìm kiếm hoặc chế độ chèn chữ
+      // Phím Escape để đóng nhanh các modal, thanh tìm kiếm hoặc chế độ chèn chữ / highlight
       if (e.key === 'Escape') {
         closePdfSearch();
         toggleTextTool(false);
+        setHighlightMode(null);
         closeFolderModal();
         closeBookmarkModal();
         closeMoveModal();
@@ -3391,6 +3743,10 @@
         rotatePage();
       } else if (e.key === 't' || e.key === 'T') {
         toggleTextTool();
+      } else if (e.key === 'h' || e.key === 'H') {
+        toggleHighlightMode('text');
+      } else if (e.key === 'a' || e.key === 'A') {
+        toggleHighlightMode('area');
       }
     });
 
@@ -3401,6 +3757,7 @@
       loadLocalStorageData();
       await openDB();
       await reloadFiles();
+      initAreaHighlightHandlers();
 
       // Nếu đã có file trong DB, tự động mở file đầu tiên để trải nghiệm ngay
       if (state.allFiles.length > 0) {
